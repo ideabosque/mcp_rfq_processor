@@ -944,46 +944,206 @@ Add to README.md:
    └─> get_provider_items(item_uuid, provider_corp_external_id)
        └─> Returns: available provider items with pricing
 
-4. Create Quote
+4. Get User Confirmation
+   └─> Present items and pricing to user for approval
+       └─> User confirms or requests modifications
+
+5. Create Quote (After User Confirmation)
    └─> create_quote(request_uuid, provider_corp_external_id, items[])
        └─> Returns: quote_uuid with auto-generated quote items
+       └─> Quote items are created automatically based on items array
 
-5. Update Quote Item Discounts (optional)
-   └─> update_quote_item_discount(quote_item_uuid, discount_amount)
-       └─> Returns: updated quote item
+6. Add Items to Quote
+   └─> Items are added during quote creation (step 5)
+       └─> Each item becomes a quote_item with:
+           ├─> item_uuid
+           ├─> provider_item_uuid
+           ├─> quantity
+           ├─> unit_price
+           └─> initial discount (if any)
 
-6. Update Quote Metadata (optional)
-   └─> update_quote(quote_uuid, shipping_amount, tax_amount, status)
-       └─> Returns: updated quote
+7. Get Discount Rules
+   └─> get_discount_rules(item_uuid, segment_uuid, quantity)
+       └─> Returns: applicable discount rules
+       └─> Evaluate rules based on:
+           ├─> Item type
+           ├─> Customer segment
+           ├─> Quantity thresholds
+           ├─> Date ranges (valid_from, valid_to)
+           └─> Promotional campaigns
 
-7. Finalize Quote
-   └─> update_quote(quote_uuid, status="submitted")
+8. Apply Discounts to Quote Items
+   └─> For each applicable discount:
+       └─> update_quote_item_discount(
+              quote_item_uuid,
+              discount_amount OR discount_percent,
+              discount_notes="Rule: [rule_name]"
+           )
+       └─> Backend automatically recalculates pricing
+
+9. Update Quote Metadata
+   └─> update_quote(quote_uuid, shipping_amount, tax_amount, notes)
+       └─> Add shipping costs
+       └─> Add tax calculations
+       └─> Update status as needed
+       └─> Backend automatically recalculates total_quote_amount
+
+10. Create Payment Installments (optional)
+    └─> create_installment(quote_uuid, installment_schedule[])
+        └─> For each installment:
+            ├─> installment_number
+            ├─> due_date
+            ├─> amount
+            └─> status
+
+11. Attach Supporting Documents (optional)
+    └─> upload_rfq_file(request_uuid, file_data, file_type)
+        └─> Upload quotes, specifications, terms
+
+12. Finalize Quote
+    └─> update_quote(quote_uuid, status="submitted")
+        └─> Locks quote for customer review
+        └─> Backend provides final calculated totals
 ```
 
-### Modifying Quote Items Workflow
+### New Request Workflow (Complete Process)
+
+```
+Scenario: Customer submits a new RFQ request
+
+1. Submit New Request
+   └─> submit_rfq_request(
+          contact_uuid="contact-123",
+          request_title="Office supplies procurement",
+          request_description="Need office supplies for Q1",
+          expired_at="2025-12-31"
+       )
+       └─> Returns: request_uuid="req-456"
+
+2. Search and Select Items
+   └─> search_items(item_type="supplies")
+       └─> User selects items with quantities
+
+3. Get User Confirmation
+   └─> Present selected items and estimated pricing
+       └─> User confirms: "Yes, proceed with quote"
+
+4. Create Quote with Items
+   └─> create_quote(
+          request_uuid="req-456",
+          provider_corp_external_id="provider-789",
+          items=[
+             {item_uuid: "item-A", quantity: 100, unit_price: 10.00},
+             {item_uuid: "item-B", quantity: 50, unit_price: 25.00}
+          ]
+       )
+       └─> Returns: quote_uuid="quote-101"
+       └─> Auto-creates quote_items in database
+
+5. Get Discount Rules
+   └─> get_discount_rules(
+          item_uuid="item-A",
+          segment_uuid="segment-corporate",
+          quantity=100
+       )
+       └─> Returns: applicable discount rules
+       └─> Example: 10% discount for quantities > 50
+
+6. Apply Discounts
+   └─> update_quote_item_discount(
+          quote_item_uuid="qi-A",
+          discount_percent=10.0,
+          discount_notes="Volume discount rule: CORP-VOL-10"
+       )
+       └─> Backend automatically recalculates quote totals
+
+7. Update Quote with Shipping/Tax
+   └─> update_quote(
+          quote_uuid="quote-101",
+          shipping_amount=50.00,
+          tax_amount=125.00
+       )
+       └─> Backend automatically recalculates total_quote_amount
+
+8. Finalize and Submit
+    └─> update_quote(quote_uuid="quote-101", status="submitted")
+        └─> Backend provides final calculated totals
+```
+
+### Modify Request Workflow (Complete Process)
 
 **IMPORTANT**: Quote items cannot be added or deleted after quote creation.
 
 ```
-Scenario: Customer wants to add/remove items from a quote
+Scenario: Customer wants to modify an existing request (add/remove items)
 
 1. Current State
    ├─> Request UUID: req-123
    ├─> Quote UUID: quote-456
-   └─> Quote Items: [item-A, item-B]
+   └─> Quote Items: [item-A (qty: 100), item-B (qty: 50)]
 
-2. Update Request with New Items
-   └─> update_rfq_request(request_uuid="req-123", requested_items=[A, B, C])
+2. Customer Requests Modification
+   └─> "I want to add item-C and remove item-B"
+
+3. Search for New Items
+   └─> search_items(item_name="item-C")
+       └─> User confirms item-C selection
+
+4. Get User Confirmation for Changes
+   └─> Present new item list: [item-A, item-C]
+       └─> User confirms: "Yes, create new quote with these items"
+
+5. Update Request
+   └─> update_rfq_request(
+          request_uuid="req-123",
+          request_description="Updated: Added item-C, removed item-B",
+          status="modified"
+       )
        └─> Returns: updated request
 
-3. Create New Quote
-   └─> create_quote(request_uuid="req-123", provider_corp_external_id, items=[A, B, C])
-       └─> Returns: new quote_uuid (quote-789)
+6. Create New Quote with Modified Items
+   └─> create_quote(
+          request_uuid="req-123",
+          provider_corp_external_id="provider-789",
+          items=[
+             {item_uuid: "item-A", quantity: 100, unit_price: 10.00},
+             {item_uuid: "item-C", quantity: 75, unit_price: 15.00}
+          ]
+       )
+       └─> Returns: new quote_uuid="quote-789"
 
-4. Result
-   ├─> Old Quote (quote-456): Status can be marked as "superseded"
-   ├─> New Quote (quote-789): Contains updated items [A, B, C]
-   └─> Audit Trail: Both quotes linked to same request
+7. Mark Old Quote as Superseded (optional)
+   └─> update_quote(
+          quote_uuid="quote-456",
+          status="superseded",
+          notes="Replaced by quote-789"
+       )
+
+8. Get Discount Rules for New Quote
+   └─> get_discount_rules() for each item in new quote
+       └─> Apply to item-A (existing)
+       └─> Apply to item-C (new)
+
+9. Apply Discounts to New Quote Items
+   └─> update_quote_item_discount() for applicable items
+       └─> Backend automatically recalculates quote totals
+
+10. Update Quote Metadata
+    └─> update_quote(
+           quote_uuid="quote-789",
+           shipping_amount=60.00,
+           tax_amount=150.00
+        )
+        └─> Backend automatically recalculates total_quote_amount
+
+11. Finalize New Quote
+    └─> update_quote(quote_uuid="quote-789", status="submitted")
+        └─> Backend provides final calculated totals
+
+12. Result
+    ├─> Old Quote (quote-456): Status "superseded"
+    ├─> New Quote (quote-789): Contains updated items [A, C]
+    └─> Audit Trail: Both quotes linked to request req-123
 ```
 
 ### Discount Management Workflow
