@@ -1,863 +1,401 @@
 # API Reference: MCP RFQ Processor
 
-## GraphQL Backend Integration
+## Overview
 
-The MCP RFQ Processor integrates with `ai_rfq_engine` GraphQL API through AWS Lambda.
+This document provides a comprehensive reference for the GraphQL API operations used by the MCP RFQ Processor, including all queries, mutations, and type definitions from the `ai_rfq_engine` GraphQL backend.
 
-### Connection Details
+## Table of Contents
 
-**Function Name**: `ai_rfq_graphql`  
-**Protocol**: GraphQL over AWS Lambda  
-**Authentication**: AWS IAM credentials  
-**Response Format**: JSON (GraphQL standard)
-
----
-
-## Data Models
-
-### Request
-Represents a customer's request for quotation.
-
-**GraphQL Type**: `RequestType`
-
-```graphql
-type Request {
-  request_uuid: String!
-  contact_uuid: String!
-  request_title: String!
-  request_description: String
-  status: String!
-  expired_at: DateTime
-  created_at: DateTime!
-  updated_at: DateTime!
-  updated_by: String!
-}
-```
-
-**Status Values**: `pending`, `quoted`, `accepted`, `rejected`, `expired`
+1. [GraphQL Schema Overview](#graphql-schema-overview)
+2. [Query Operations](#query-operations)
+3. [Mutation Operations](#mutation-operations)
+4. [Type Definitions](#type-definitions)
+5. [MCP Tool to GraphQL Mapping](#mcp-tool-to-graphql-mapping)
+6. [Example Queries](#example-queries)
 
 ---
 
-### Item
-Represents a product or service in the catalog.
+## GraphQL Schema Overview
 
-**GraphQL Type**: `ItemType`
-
-```graphql
-type Item {
-  item_uuid: String!
-  item_type: String!
-  item_name: String!
-  item_description: String
-  uoms: [String!]!
-  attributes: JSONString
-  created_at: DateTime!
-  updated_at: DateTime!
-  updated_by: String!
-}
-```
-
-**Item Types**: `product`, `service`, `material`, `component`
+The `ai_rfq_engine` GraphQL API provides comprehensive management of:
+- **Items**: Product/service catalog
+- **Segments**: Customer/provider pricing groups
+- **Provider Items**: Supplier inventory
+- **Requests**: RFQ submissions
+- **Quotes**: Price quotations
+- **Quote Items**: Quote line items
+- **Installments**: Payment schedules
+- **Files**: Document attachments
+- **Discounts**: Pricing rules
 
 ---
 
-### ProviderItem
-Represents a supplier's inventory item with pricing.
-
-**GraphQL Type**: `ProviderItemType`
-
-```graphql
-type ProviderItem {
-  provider_item_uuid: String!
-  item_uuid: String!
-  provider_corp_external_id: String!
-  provider_item_external_id: String!
-  base_price_per_uom: Float!
-  currency: String!
-  lead_time_days: Int
-  min_order_qty: Float
-  item: Item!
-  created_at: DateTime!
-  updated_at: DateTime!
-  updated_by: String!
-}
-```
-
----
-
-### ProviderItemBatch
-Represents inventory batches with lot tracking.
-
-**GraphQL Type**: `ProviderItemBatchType`
-
-```graphql
-type ProviderItemBatch {
-  provider_item_uuid: String!
-  batch_no: String!
-  item_uuid: String!
-  produced_at: DateTime
-  expired_at: DateTime
-  cost_per_uom: Float!
-  total_cost_per_uom: Float!
-  available_qty: Float!
-  in_stock: Boolean!
-  notes: String
-  created_at: DateTime!
-  updated_at: DateTime!
-  updated_by: String!
-}
-```
-
----
-
-### Quote
-Represents a price quotation for an RFQ request.
-
-**GraphQL Type**: `QuoteType`
-
-```graphql
-type Quote {
-  quote_uuid: String!
-  request_uuid: String!
-  provider_corp_external_id: String!
-  shipping_method: String!
-  shipping_amount: Float!
-  tax_amount: Float!
-  total_quote_amount: Float!
-  total_quote_discount: Float!
-  final_total_quote_amount: Float!
-  status: String!
-  notes: String
-  quote_items: [QuoteItem!]
-  created_at: DateTime!
-  updated_at: DateTime!
-  updated_by: String!
-}
-```
-
-**Status Values**: `draft`, `submitted`, `accepted`, `rejected`, `expired`
-
----
-
-### QuoteItem
-Represents a line item in a quote.
-
-**GraphQL Type**: `QuoteItemType`
-
-```graphql
-type QuoteItem {
-  quote_item_uuid: String!
-  quote_uuid: String!
-  provider_item_uuid: String!
-  item_uuid: String!
-  batch_no: String
-  qty: Float!
-  uom: String!
-  price_per_uom: Float!
-  subtotal: Float!
-  subtotal_discount: Float!
-  final_subtotal: Float!
-  notes: String
-  created_at: DateTime!
-  updated_at: DateTime!
-  updated_by: String!
-}
-```
-
----
-
-### ItemPriceTier
-Represents quantity-based pricing tiers.
-
-**GraphQL Type**: `ItemPriceTierType`
-
-```graphql
-type ItemPriceTier {
-  item_price_tier_uuid: String!
-  item_uuid: String!
-  provider_item_uuid: String
-  segment_uuid: String
-  min_quantity: Float!
-  max_quantity: Float
-  price: Float!
-  currency: String!
-  effective_from: DateTime
-  effective_to: DateTime
-  created_at: DateTime!
-  updated_at: DateTime!
-  updated_by: String!
-}
-```
-
----
-
-### DiscountRule
-Represents promotional discount rules.
-
-**GraphQL Type**: `DiscountRuleType`
-
-```graphql
-type DiscountRule {
-  discount_rule_uuid: String!
-  item_uuid: String!
-  provider_item_uuid: String
-  segment_uuid: String
-  min_subtotal: Float
-  max_subtotal: Float
-  discount_percentage: Float!
-  discount_amount: Float
-  effective_from: DateTime
-  effective_to: DateTime
-  created_at: DateTime!
-  updated_at: DateTime!
-  updated_by: String!
-}
-```
-
----
-
-### Installment
-Represents payment installment schedules.
-
-**GraphQL Type**: `InstallmentType`
-
-```graphql
-type Installment {
-  installment_uuid: String!
-  quote_uuid: String!
-  request_uuid: String!
-  priority: Int!
-  scheduled_date: DateTime!
-  installment_ratio: Float!
-  installment_amount: Float!
-  status: String!
-  salesorder_no: String
-  notes: String
-  created_at: DateTime!
-  updated_at: DateTime!
-  updated_by: String!
-}
-```
-
-**Status Values**: `scheduled`, `paid`, `overdue`, `cancelled`
-
----
-
-### File
-Represents uploaded documents.
-
-**GraphQL Type**: `FileType`
-
-```graphql
-type File {
-  request_uuid: String!
-  file_name: String!
-  file_url: String!
-  file_type: String
-  file_size: Int
-  email: String!
-  notes: String
-  created_at: DateTime!
-  updated_at: DateTime!
-  updated_by: String!
-}
-```
-
----
-
-### Segment
-Represents customer/provider groups for pricing.
-
-**GraphQL Type**: `SegmentType`
-
-```graphql
-type Segment {
-  segment_uuid: String!
-  provider_corp_external_id: String!
-  segment_name: String!
-  segment_description: String
-  created_at: DateTime!
-  updated_at: DateTime!
-  updated_by: String!
-}
-```
-
----
-
-### SegmentContact
-Represents contact associations with segments.
-
-**GraphQL Type**: `SegmentContactType`
-
-```graphql
-type SegmentContact {
-  segment_uuid: String!
-  contact_uuid: String!
-  email: String!
-  consumer_corp_external_id: String
-  created_at: DateTime!
-  updated_at: DateTime!
-  updated_by: String!
-}
-```
-
----
-
-## GraphQL Queries
+## Query Operations
 
 ### Request Queries
 
 #### `request`
-Get single request by UUID.
+Retrieve a single RFQ request by UUID.
 
+**Variables:**
 ```graphql
-query GetRequest($requestUuid: String!) {
-  request(requestUuid: $requestUuid) {
-    request_uuid
-    contact_uuid
-    request_title
-    request_description
+{
+  requestUuid: String!
+}
+```
+
+**Returns:** `Request`
+
+**Example:**
+```graphql
+query {
+  request(requestUuid: "req-123") {
+    requestUuid
+    contactUuid
+    requestTitle
+    requestDescription
     status
-    expired_at
-    created_at
-    updated_at
+    expiredAt
+    createdAt
+    updatedAt
   }
 }
 ```
 
 #### `requestList`
-Search and filter requests.
+Search and filter RFQ requests.
 
+**Variables:**
 ```graphql
-query SearchRequests(
-  $pageNumber: Int
-  $limit: Int
-  $contactUuid: String
-  $statuses: [String]
-  $fromExpiredAt: DateTime
-  $toExpiredAt: DateTime
-) {
+{
+  pageNumber: Int
+  limit: Int
+  contactUuid: String
+  statuses: [String]
+  fromExpiredAt: String
+  toExpiredAt: String
+}
+```
+
+**Returns:** `RequestListType`
+
+**Example:**
+```graphql
+query {
   requestList(
-    pageNumber: $pageNumber
-    limit: $limit
-    contactUuid: $contactUuid
-    statuses: $statuses
-    fromExpiredAt: $fromExpiredAt
-    toExpiredAt: $toExpiredAt
+    pageNumber: 1,
+    limit: 20,
+    contactUuid: "contact-123",
+    statuses: ["pending", "active"]
   ) {
-    total
-    requestList {
-      request_uuid
-      contact_uuid
-      request_title
+    totalCount
+    requests {
+      requestUuid
+      requestTitle
       status
-      expired_at
+      expiredAt
     }
   }
 }
 ```
-
----
 
 ### Item Queries
 
 #### `item`
-Get single item by UUID.
+Get item details by UUID.
 
+**Variables:**
 ```graphql
-query GetItem($itemUuid: String!) {
-  item(itemUuid: $itemUuid) {
-    item_uuid
-    item_type
-    item_name
-    item_description
-    uoms
-    attributes
-    created_at
-  }
+{
+  itemUuid: String!
 }
 ```
+
+**Returns:** `Item`
 
 #### `itemList`
 Search items catalog.
 
+**Variables:**
 ```graphql
-query SearchItems(
-  $pageNumber: Int
-  $limit: Int
-  $itemType: String
-  $itemName: String
-  $uoms: [String]
-) {
-  itemList(
-    pageNumber: $pageNumber
-    limit: $limit
-    itemType: $itemType
-    itemName: $itemName
-    uoms: $uoms
-  ) {
-    total
-    itemList {
-      item_uuid
-      item_type
-      item_name
-      item_description
-      uoms
-    }
-  }
+{
+  pageNumber: Int
+  limit: Int
+  itemType: String
+  itemName: String
+  uoms: [String]
 }
 ```
+
+**Returns:** `ItemListType`
+
+### Provider Item Queries
+
+#### `providerItem`
+Get provider item details.
+
+**Variables:**
+```graphql
+{
+  providerItemUuid: String!
+}
+```
+
+**Returns:** `ProviderItem`
 
 #### `providerItemList`
 Search provider inventory.
 
+**Variables:**
 ```graphql
-query SearchProviderItems(
-  $pageNumber: Int
-  $limit: Int
-  $itemUuid: String
-  $providerCorpExternalId: String
-  $minBasePricePerUom: Float
-  $maxBasePricePerUom: Float
-) {
-  providerItemList(
-    pageNumber: $pageNumber
-    limit: $limit
-    itemUuid: $itemUuid
-    providerCorpExternalId: $providerCorpExternalId
-    minBasePricePerUom: $minBasePricePerUom
-    maxBasePricePerUom: $maxBasePricePerUom
-  ) {
-    total
-    providerItemList {
-      provider_item_uuid
-      item_uuid
-      provider_corp_external_id
-      base_price_per_uom
-      currency
-      lead_time_days
-      item {
-        item_name
-        item_type
-      }
-    }
-  }
+{
+  pageNumber: Int
+  limit: Int
+  itemUuid: String
+  providerCorpExternalId: String
+  minBasePricePerUom: Float
+  maxBasePricePerUom: Float
 }
 ```
+
+**Returns:** `ProviderItemListType`
 
 #### `providerItemBatchList`
-Get batch inventory.
+Get batch information for provider items.
 
+**Variables:**
 ```graphql
-query GetProviderItemBatches(
-  $providerItemUuid: String
-  $itemUuid: String
-  $inStock: Boolean
-  $expiredAtGt: DateTime
-) {
-  providerItemBatchList(
-    providerItemUuid: $providerItemUuid
-    itemUuid: $itemUuid
-    inStock: $inStock
-    expiredAtGt: $expiredAtGt
-  ) {
-    total
-    providerItemBatchList {
-      provider_item_uuid
-      batch_no
-      produced_at
-      expired_at
-      available_qty
-      in_stock
-      cost_per_uom
-    }
-  }
+{
+  pageNumber: Int
+  limit: Int
+  providerItemUuid: String
+  batchNumber: String
 }
 ```
 
----
+**Returns:** `ProviderItemBatchListType`
 
 ### Quote Queries
 
 #### `quote`
-Get single quote.
+Retrieve quote details.
 
+**Variables:**
 ```graphql
-query GetQuote($requestUuid: String!, $quoteUuid: String!) {
-  quote(requestUuid: $requestUuid, quoteUuid: $quoteUuid) {
-    quote_uuid
-    request_uuid
-    provider_corp_external_id
-    shipping_method
-    shipping_amount
-    tax_amount
-    total_quote_amount
-    total_quote_discount
-    final_total_quote_amount
-    status
-    created_at
-  }
+{
+  quoteUuid: String!
 }
 ```
+
+**Returns:** `Quote`
 
 #### `quoteList`
 Search quotes.
 
+**Variables:**
 ```graphql
-query SearchQuotes(
-  $pageNumber: Int
-  $limit: Int
-  $requestUuid: String
-  $providerCorpExternalId: String
-  $statuses: [String]
-  $minTotalQuoteAmount: Float
-  $maxTotalQuoteAmount: Float
-) {
-  quoteList(
-    pageNumber: $pageNumber
-    limit: $limit
-    requestUuid: $requestUuid
-    providerCorpExternalId: $providerCorpExternalId
-    statuses: $statuses
-    minTotalQuoteAmount: $minTotalQuoteAmount
-    maxTotalQuoteAmount: $maxTotalQuoteAmount
-  ) {
-    total
-    quoteList {
-      quote_uuid
-      request_uuid
-      provider_corp_external_id
-      total_quote_amount
-      status
-    }
-  }
+{
+  pageNumber: Int
+  limit: Int
+  requestUuid: String
+  providerCorpExternalId: String
+  statuses: [String]
+  fromCreatedAt: String
+  toCreatedAt: String
 }
 ```
 
-#### `quoteItemList`
-Get quote line items.
-
-```graphql
-query GetQuoteItems($quoteUuid: String!) {
-  quoteItemList(quoteUuid: $quoteUuid) {
-    total
-    quoteItemList {
-      quote_item_uuid
-      quote_uuid
-      item_uuid
-      qty
-      uom
-      price_per_uom
-      subtotal
-      subtotal_discount
-      final_subtotal
-    }
-  }
-}
-```
-
----
+**Returns:** `QuoteListType`
 
 ### Pricing Queries
 
 #### `itemPriceTierList`
-Get tiered pricing.
+Get tiered pricing for items.
 
+**Variables:**
 ```graphql
-query GetItemPriceTiers(
-  $itemUuid: String
-  $providerItemUuid: String
-  $segmentUuid: String
-) {
-  itemPriceTierList(
-    itemUuid: $itemUuid
-    providerItemUuid: $providerItemUuid
-    segmentUuid: $segmentUuid
-  ) {
-    total
-    itemPriceTierList {
-      item_price_tier_uuid
-      min_quantity
-      max_quantity
-      price
-      currency
-      effective_from
-      effective_to
-    }
-  }
+{
+  pageNumber: Int
+  limit: Int
+  itemUuid: String
+  segmentUuid: String
+  minQuantity: Int
 }
 ```
+
+**Returns:** `ItemPriceTierListType`
 
 #### `discountRuleList`
 Get discount rules.
 
+**Variables:**
 ```graphql
-query GetDiscountRules(
-  $itemUuid: String
-  $providerItemUuid: String
-  $segmentUuid: String
-) {
-  discountRuleList(
-    itemUuid: $itemUuid
-    providerItemUuid: $providerItemUuid
-    segmentUuid: $segmentUuid
-  ) {
-    total
-    discountRuleList {
-      discount_rule_uuid
-      min_subtotal
-      max_subtotal
-      discount_percentage
-      discount_amount
-      effective_from
-      effective_to
-    }
-  }
+{
+  pageNumber: Int
+  limit: Int
+  itemUuid: String
+  segmentUuid: String
+  validFrom: String
+  validTo: String
 }
 ```
 
----
+**Returns:** `DiscountRuleListType`
 
 ### Installment Queries
 
 #### `installmentList`
-Get payment schedule.
+Get installment schedule.
 
+**Variables:**
 ```graphql
-query GetInstallments($quoteUuid: String!) {
-  installmentList(quoteUuid: $quoteUuid) {
-    total
-    installmentList {
-      installment_uuid
-      quote_uuid
-      priority
-      scheduled_date
-      installment_ratio
-      installment_amount
-      status
-      salesorder_no
-    }
-  }
+{
+  pageNumber: Int
+  limit: Int
+  quoteUuid: String
+  statuses: [String]
 }
 ```
 
----
+**Returns:** `InstallmentListType`
 
 ### File Queries
 
 #### `fileList`
-Get RFQ files.
+Get files associated with requests.
 
+**Variables:**
 ```graphql
-query GetRFQFiles($requestUuid: String!) {
-  fileList(requestUuid: $requestUuid) {
-    total
-    fileList {
-      request_uuid
-      file_name
-      file_url
-      file_type
-      file_size
-      email
-      created_at
-    }
-  }
+{
+  pageNumber: Int
+  limit: Int
+  requestUuid: String
+  fileType: String
 }
 ```
 
----
+**Returns:** `FileListType`
 
 ### Segment Queries
 
-#### `segmentList`
-Search segments.
+#### `segment`
+Get segment details.
 
+**Variables:**
 ```graphql
-query SearchSegments(
-  $providerCorpExternalId: String
-  $segmentName: String
-) {
-  segmentList(
-    providerCorpExternalId: $providerCorpExternalId
-    segmentName: $segmentName
-  ) {
-    total
-    segmentList {
-      segment_uuid
-      provider_corp_external_id
-      segment_name
-      segment_description
-    }
-  }
+{
+  segmentUuid: String!
 }
 ```
+
+**Returns:** `Segment`
 
 #### `segmentContactList`
-Get segment contacts.
+List contacts in a segment.
 
+**Variables:**
 ```graphql
-query GetSegmentContacts($segmentUuid: String!) {
-  segmentContactList(segmentUuid: $segmentUuid) {
-    total
-    segmentContactList {
-      segment_uuid
-      contact_uuid
-      email
-      consumer_corp_external_id
-    }
-  }
+{
+  pageNumber: Int
+  limit: Int
+  segmentUuid: String
+  contactUuid: String
 }
 ```
+
+**Returns:** `SegmentContactListType`
 
 ---
 
-## GraphQL Mutations
+## Mutation Operations
 
 ### Request Mutations
 
 #### `insertUpdateRequest`
-Create or update request.
+Create or update an RFQ request.
 
+**Variables:**
 ```graphql
-mutation CreateRequest(
-  $requestUuid: String
-  $contactUuid: String!
-  $requestTitle: String!
-  $requestDescription: String
-  $expiredAt: DateTime
-  $status: String
-  $updatedBy: String!
-) {
+{
+  requestUuid: String
+  contactUuid: String!
+  requestTitle: String!
+  requestDescription: String
+  expiredAt: String
+  status: String
+  updatedBy: String!
+}
+```
+
+**Returns:** `InsertUpdateRequestType`
+
+**Example:**
+```graphql
+mutation {
   insertUpdateRequest(
-    requestUuid: $requestUuid
-    contactUuid: $contactUuid
-    requestTitle: $requestTitle
-    requestDescription: $requestDescription
-    expiredAt: $expiredAt
-    status: $status
-    updatedBy: $updatedBy
+    contactUuid: "contact-123",
+    requestTitle: "Office supplies Q1",
+    requestDescription: "Need supplies for new office",
+    expiredAt: "2025-12-31",
+    status: "pending",
+    updatedBy: "MCP"
   ) {
     request {
-      request_uuid
+      requestUuid
+      requestTitle
       status
-      created_at
+      createdAt
     }
   }
 }
 ```
-
-#### `deleteRequest`
-Delete request.
-
-```graphql
-mutation DeleteRequest($requestUuid: String!) {
-  deleteRequest(requestUuid: $requestUuid) {
-    success
-  }
-}
-```
-
----
-
-### Item Mutations
-
-#### `insertUpdateItem`
-Create or update item.
-
-```graphql
-mutation CreateItem(
-  $itemUuid: String
-  $itemType: String!
-  $itemName: String!
-  $itemDescription: String
-  $uoms: [String!]!
-  $attributes: JSONString
-  $updatedBy: String!
-) {
-  insertUpdateItem(
-    itemUuid: $itemUuid
-    itemType: $itemType
-    itemName: $itemName
-    itemDescription: $itemDescription
-    uoms: $uoms
-    attributes: $attributes
-    updatedBy: $updatedBy
-  ) {
-    item {
-      item_uuid
-      item_name
-    }
-  }
-}
-```
-
-#### `insertUpdateProviderItem`
-Create or update provider item.
-
-```graphql
-mutation CreateProviderItem(
-  $providerItemUuid: String
-  $itemUuid: String!
-  $providerCorpExternalId: String!
-  $providerItemExternalId: String!
-  $basePricePerUom: Float!
-  $currency: String!
-  $leadTimeDays: Int
-  $minOrderQty: Float
-  $updatedBy: String!
-) {
-  insertUpdateProviderItem(
-    providerItemUuid: $providerItemUuid
-    itemUuid: $itemUuid
-    providerCorpExternalId: $providerCorpExternalId
-    providerItemExternalId: $providerItemExternalId
-    basePricePerUom: $basePricePerUom
-    currency: $currency
-    leadTimeDays: $leadTimeDays
-    minOrderQty: $minOrderQty
-    updatedBy: $updatedBy
-  ) {
-    providerItem {
-      provider_item_uuid
-      base_price_per_uom
-    }
-  }
-}
-```
-
----
 
 ### Quote Mutations
 
 #### `insertUpdateQuote`
-Create or update quote.
+Create or update a quote.
 
+**Variables:**
 ```graphql
-mutation CreateQuote(
-  $quoteUuid: String
-  $requestUuid: String!
-  $providerCorpExternalId: String!
-  $shippingMethod: String!
-  $shippingAmount: Float!
-  $taxAmount: Float
-  $status: String
-  $notes: String
-  $updatedBy: String!
-) {
+{
+  quoteUuid: String
+  requestUuid: String!
+  providerCorpExternalId: String!
+  shippingMethod: String
+  shippingAmount: Float
+  taxAmount: Float
+  status: String
+  notes: String
+  items: [QuoteItemInput]
+  updatedBy: String!
+}
+```
+
+**Returns:** `InsertUpdateQuoteType`
+
+**Example:**
+```graphql
+mutation {
   insertUpdateQuote(
-    quoteUuid: $quoteUuid
-    requestUuid: $requestUuid
-    providerCorpExternalId: $providerCorpExternalId
-    shippingMethod: $shippingMethod
-    shippingAmount: $shippingAmount
-    taxAmount: $taxAmount
-    status: $status
-    notes: $notes
-    updatedBy: $updatedBy
+    requestUuid: "req-123",
+    providerCorpExternalId: "provider-789",
+    shippingMethod: "express",
+    shippingAmount: 50.0,
+    taxAmount: 125.0,
+    status: "draft",
+    items: [
+      {
+        itemUuid: "item-A",
+        providerItemUuid: "pitem-1",
+        quantity: 100,
+        unitPrice: 10.0
+      }
+    ],
+    updatedBy: "MCP"
   ) {
     quote {
-      quote_uuid
-      total_quote_amount
+      quoteUuid
+      totalQuoteAmount
       status
     }
   }
@@ -865,166 +403,466 @@ mutation CreateQuote(
 ```
 
 #### `insertUpdateQuoteItem`
-Create or update quote line item.
+Update quote item (discount only).
 
+**Variables:**
 ```graphql
-mutation AddQuoteItem(
-  $quoteItemUuid: String
-  $quoteUuid: String!
-  $providerItemUuid: String!
-  $itemUuid: String!
-  $batchNo: String
-  $qty: Float!
-  $uom: String!
-  $pricePerUom: Float!
-  $notes: String
-  $updatedBy: String!
-) {
+{
+  quoteItemUuid: String!
+  discountAmount: Float
+  discountPercent: Float
+  discountNotes: String
+  updatedBy: String!
+}
+```
+
+**Returns:** `InsertUpdateQuoteItemType`
+
+**Example:**
+```graphql
+mutation {
   insertUpdateQuoteItem(
-    quoteItemUuid: $quoteItemUuid
-    quoteUuid: $quoteUuid
-    providerItemUuid: $providerItemUuid
-    itemUuid: $itemUuid
-    batchNo: $batchNo
-    qty: $qty
-    uom: $uom
-    pricePerUom: $pricePerUom
-    notes: $notes
-    updatedBy: $updatedBy
+    quoteItemUuid: "qi-123",
+    discountPercent: 10.0,
+    discountNotes: "Volume discount",
+    updatedBy: "MCP"
   ) {
     quoteItem {
-      quote_item_uuid
-      subtotal
-      final_subtotal
+      quoteItemUuid
+      discountAmount
+      discountPercent
+      totalAmount
     }
   }
 }
 ```
-
-#### `deleteQuoteItem`
-Remove quote line item.
-
-```graphql
-mutation DeleteQuoteItem($quoteUuid: String!, $quoteItemUuid: String!) {
-  deleteQuoteItem(quoteUuid: $quoteUuid, quoteItemUuid: $quoteItemUuid) {
-    success
-  }
-}
-```
-
----
-
-### Pricing Mutations
-
-#### `insertUpdateItemPriceTier`
-Create or update price tier.
-
-```graphql
-mutation CreatePriceTier(
-  $itemPriceTierUuid: String
-  $itemUuid: String!
-  $providerItemUuid: String
-  $segmentUuid: String
-  $minQuantity: Float!
-  $maxQuantity: Float
-  $price: Float!
-  $currency: String!
-  $effectiveFrom: DateTime
-  $effectiveTo: DateTime
-  $updatedBy: String!
-) {
-  insertUpdateItemPriceTier(
-    itemPriceTierUuid: $itemPriceTierUuid
-    itemUuid: $itemUuid
-    providerItemUuid: $providerItemUuid
-    segmentUuid: $segmentUuid
-    minQuantity: $minQuantity
-    maxQuantity: $maxQuantity
-    price: $price
-    currency: $currency
-    effectiveFrom: $effectiveFrom
-    effectiveTo: $effectiveTo
-    updatedBy: $updatedBy
-  ) {
-    itemPriceTier {
-      item_price_tier_uuid
-      price
-    }
-  }
-}
-```
-
-#### `insertUpdateDiscountRule`
-Create or update discount rule.
-
-```graphql
-mutation CreateDiscountRule(
-  $discountRuleUuid: String
-  $itemUuid: String!
-  $providerItemUuid: String
-  $segmentUuid: String
-  $minSubtotal: Float
-  $maxSubtotal: Float
-  $discountPercentage: Float!
-  $discountAmount: Float
-  $effectiveFrom: DateTime
-  $effectiveTo: DateTime
-  $updatedBy: String!
-) {
-  insertUpdateDiscountRule(
-    discountRuleUuid: $discountRuleUuid
-    itemUuid: $itemUuid
-    providerItemUuid: $providerItemUuid
-    segmentUuid: $segmentUuid
-    minSubtotal: $minSubtotal
-    maxSubtotal: $maxSubtotal
-    discountPercentage: $discountPercentage
-    discountAmount: $discountAmount
-    effectiveFrom: $effectiveFrom
-    effectiveTo: $effectiveTo
-    updatedBy: $updatedBy
-  ) {
-    discountRule {
-      discount_rule_uuid
-      discount_percentage
-    }
-  }
-}
-```
-
----
 
 ### Installment Mutations
 
 #### `insertUpdateInstallment`
-Create or update installment.
+Create or update payment installment.
+
+**Variables:**
+```graphql
+{
+  installmentUuid: String
+  quoteUuid: String!
+  installmentNumber: Int!
+  dueDate: String!
+  amount: Float!
+  status: String
+  updatedBy: String!
+}
+```
+
+**Returns:** `InsertUpdateInstallmentType`
+
+### File Mutations
+
+#### `insertUpdateFile`
+Upload file attachment.
+
+**Variables:**
+```graphql
+{
+  fileUuid: String
+  requestUuid: String!
+  fileName: String!
+  fileType: String!
+  fileData: String!
+  updatedBy: String!
+}
+```
+
+**Returns:** `InsertUpdateFileType`
+
+### Segment Mutations
+
+#### `insertUpdateSegment`
+Create or update pricing segment.
+
+**Variables:**
+```graphql
+{
+  segmentUuid: String
+  segmentName: String!
+  segmentDescription: String
+  updatedBy: String!
+}
+```
+
+**Returns:** `InsertUpdateSegmentType`
+
+#### `insertUpdateSegmentContact`
+Add contact to segment.
+
+**Variables:**
+```graphql
+{
+  segmentContactUuid: String
+  segmentUuid: String!
+  contactUuid: String!
+  updatedBy: String!
+}
+```
+
+**Returns:** `InsertUpdateSegmentContactType`
+
+---
+
+## Type Definitions
+
+### Request
+```graphql
+type Request {
+  requestUuid: String!
+  contactUuid: String!
+  requestTitle: String!
+  requestDescription: String
+  status: String!
+  expiredAt: String
+  createdAt: String!
+  updatedAt: String!
+  quotes: [Quote]
+  files: [File]
+}
+```
+
+### Item
+```graphql
+type Item {
+  itemUuid: String!
+  itemType: String!
+  itemName: String!
+  itemDescription: String
+  uom: String!
+  createdAt: String!
+  updatedAt: String!
+  providerItems: [ProviderItem]
+  priceTiers: [ItemPriceTier]
+}
+```
+
+### ProviderItem
+```graphql
+type ProviderItem {
+  providerItemUuid: String!
+  itemUuid: String!
+  providerCorpExternalId: String!
+  basePricePerUom: Float!
+  availableQuantity: Int
+  leadTimeDays: Int
+  createdAt: String!
+  updatedAt: String!
+  item: Item
+  batches: [ProviderItemBatch]
+}
+```
+
+### Quote
+```graphql
+type Quote {
+  quoteUuid: String!
+  requestUuid: String!
+  providerCorpExternalId: String!
+  shippingMethod: String
+  shippingAmount: Float
+  taxAmount: Float
+  totalQuoteAmount: Float!
+  status: String!
+  notes: String
+  createdAt: String!
+  updatedAt: String!
+  request: Request
+  quoteItems: [QuoteItem]
+  installments: [Installment]
+}
+```
+
+### QuoteItem
+```graphql
+type QuoteItem {
+  quoteItemUuid: String!
+  quoteUuid: String!
+  itemUuid: String!
+  providerItemUuid: String!
+  quantity: Int!
+  unitPrice: Float!
+  discountAmount: Float
+  discountPercent: Float
+  discountNotes: String
+  totalAmount: Float!
+  createdAt: String!
+  updatedAt: String!
+  item: Item
+  providerItem: ProviderItem
+}
+```
+
+### Installment
+```graphql
+type Installment {
+  installmentUuid: String!
+  quoteUuid: String!
+  installmentNumber: Int!
+  dueDate: String!
+  amount: Float!
+  status: String!
+  paidAt: String
+  createdAt: String!
+  updatedAt: String!
+}
+```
+
+### File
+```graphql
+type File {
+  fileUuid: String!
+  requestUuid: String!
+  fileName: String!
+  fileType: String!
+  fileUrl: String!
+  createdAt: String!
+  updatedAt: String!
+}
+```
+
+### Segment
+```graphql
+type Segment {
+  segmentUuid: String!
+  segmentName: String!
+  segmentDescription: String
+  createdAt: String!
+  updatedAt: String!
+  contacts: [SegmentContact]
+}
+```
+
+---
+
+## MCP Tool to GraphQL Mapping
+
+| MCP Tool | GraphQL Operation | Type | Notes |
+|----------|-------------------|------|-------|
+| submit_rfq_request | insertUpdateRequest | Mutation | Create new request |
+| update_rfq_request | insertUpdateRequest | Mutation | Update existing request |
+| get_rfq_request | request | Query | Retrieve single request |
+| search_rfq_requests | requestList | Query | Search with filters |
+| search_items | itemList | Query | Search catalog |
+| get_item | item | Query | Get item details |
+| get_provider_items | providerItemList | Query | Search inventory |
+| get_provider_item_batches | providerItemBatchList | Query | Get batch info |
+| create_quote | insertUpdateQuote | Mutation | Create new quote |
+| update_quote | insertUpdateQuote | Mutation | Update quote metadata |
+| update_quote_item_discount | insertUpdateQuoteItem | Mutation | Update item discount only |
+| get_quote | quote | Query | Retrieve quote |
+| search_quotes | quoteList | Query | Search quotes |
+| get_item_price_tiers | itemPriceTierList | Query | Get tiered pricing |
+| get_discount_rules | discountRuleList | Query | Get discount rules |
+| create_installment | insertUpdateInstallment | Mutation | Create installment |
+| get_installments | installmentList | Query | Get installment schedule |
+| upload_rfq_file | insertUpdateFile | Mutation | Upload document |
+| get_rfq_files | fileList | Query | Get files |
+| create_segment | insertUpdateSegment | Mutation | Create segment |
+| add_contact_to_segment | insertUpdateSegmentContact | Mutation | Add contact |
+| get_segment_contacts | segmentContactList | Query | List contacts |
+
+---
+
+## Example Queries
+
+### Complete RFQ Workflow Example
 
 ```graphql
-mutation CreateInstallment(
-  $installmentUuid: String
-  $quoteUuid: String!
-  $priority: Int!
-  $scheduledDate: DateTime!
-  $installmentRatio: Float!
-  $status: String
-  $salesorderNo: String
-  $notes: String
-  $updatedBy: String!
-) {
-  insertUpdateInstallment(
-    installmentUuid: $installmentUuid
-    quoteUuid: $quoteUuid
-    priority: $priority
-    scheduledDate: $scheduledDate
-    installmentRatio: $installmentRatio
-    status: $status
-    salesorderNo: $salesorderNo
-    notes: $notes
-    updatedBy: $updatedBy
+# Step 1: Submit RFQ Request
+mutation {
+  insertUpdateRequest(
+    contactUuid: "contact-123",
+    requestTitle: "Office Supplies Q1 2025",
+    requestDescription: "Need supplies for new office location",
+    expiredAt: "2025-12-31",
+    status: "pending",
+    updatedBy: "MCP"
   ) {
-    installment {
-      installment_uuid
-      installment_amount
+    request {
+      requestUuid
+      requestTitle
+      status
+    }
+  }
+}
+
+# Step 2: Search Items
+query {
+  itemList(
+    pageNumber: 1,
+    limit: 50,
+    itemType: "supplies",
+    itemName: "paper"
+  ) {
+    totalCount
+    items {
+      itemUuid
+      itemName
+      itemDescription
+      uom
+    }
+  }
+}
+
+# Step 3: Get Provider Items
+query {
+  providerItemList(
+    itemUuid: "item-123",
+    providerCorpExternalId: "provider-789"
+  ) {
+    totalCount
+    providerItems {
+      providerItemUuid
+      basePricePerUom
+      availableQuantity
+      leadTimeDays
+    }
+  }
+}
+
+# Step 4: Create Quote
+mutation {
+  insertUpdateQuote(
+    requestUuid: "req-456",
+    providerCorpExternalId: "provider-789",
+    shippingMethod: "express",
+    shippingAmount: 50.0,
+    taxAmount: 125.0,
+    status: "draft",
+    items: [
+      {
+        itemUuid: "item-A",
+        providerItemUuid: "pitem-1",
+        quantity: 100,
+        unitPrice: 10.0
+      },
+      {
+        itemUuid: "item-B",
+        providerItemUuid: "pitem-2",
+        quantity: 50,
+        unitPrice: 25.0
+      }
+    ],
+    updatedBy: "MCP"
+  ) {
+    quote {
+      quoteUuid
+      totalQuoteAmount
+      status
+      quoteItems {
+        quoteItemUuid
+        itemUuid
+        quantity
+        unitPrice
+        totalAmount
+      }
+    }
+  }
+}
+
+# Step 5: Apply Discount to Quote Item
+mutation {
+  insertUpdateQuoteItem(
+    quoteItemUuid: "qi-123",
+    discountPercent: 10.0,
+    discountNotes: "Volume discount for 100+ units",
+    updatedBy: "MCP"
+  ) {
+    quoteItem {
+      quoteItemUuid
+      discountAmount
+      discountPercent
+      totalAmount
+    }
+  }
+}
+
+# Step 6: Update Quote Status
+mutation {
+  insertUpdateQuote(
+    quoteUuid: "quote-789",
+    status: "submitted",
+    updatedBy: "MCP"
+  ) {
+    quote {
+      quoteUuid
+      status
+      totalQuoteAmount
+      updatedAt
+    }
+  }
+}
+```
+
+### Modify Request Workflow Example
+
+```graphql
+# Step 1: Update Request
+mutation {
+  insertUpdateRequest(
+    requestUuid: "req-456",
+    requestDescription: "Updated: Added item-C, removed item-B",
+    status: "modified",
+    updatedBy: "MCP"
+  ) {
+    request {
+      requestUuid
+      requestDescription
+      status
+      updatedAt
+    }
+  }
+}
+
+# Step 2: Create New Quote with Modified Items
+mutation {
+  insertUpdateQuote(
+    requestUuid: "req-456",
+    providerCorpExternalId: "provider-789",
+    items: [
+      {
+        itemUuid: "item-A",
+        providerItemUuid: "pitem-1",
+        quantity: 100,
+        unitPrice: 10.0
+      },
+      {
+        itemUuid: "item-C",
+        providerItemUuid: "pitem-3",
+        quantity: 75,
+        unitPrice: 15.0
+      }
+    ],
+    updatedBy: "MCP"
+  ) {
+    quote {
+      quoteUuid
+      totalQuoteAmount
+      quoteItems {
+        itemUuid
+        quantity
+      }
+    }
+  }
+}
+
+# Step 3: Mark Old Quote as Superseded
+mutation {
+  insertUpdateQuote(
+    quoteUuid: "quote-old",
+    status: "superseded",
+    notes: "Replaced by quote-new",
+    updatedBy: "MCP"
+  ) {
+    quote {
+      quoteUuid
       status
     }
   }
@@ -1033,193 +871,29 @@ mutation CreateInstallment(
 
 ---
 
-### File Mutations
+## Error Codes
 
-#### `insertUpdateFile`
-Upload file.
-
-```graphql
-mutation UploadFile(
-  $requestUuid: String!
-  $fileName: String!
-  $fileUrl: String!
-  $fileType: String
-  $fileSize: Int
-  $email: String!
-  $notes: String
-  $updatedBy: String!
-) {
-  insertUpdateFile(
-    requestUuid: $requestUuid
-    fileName: $fileName
-    fileUrl: $fileUrl
-    fileType: $fileType
-    fileSize: $fileSize
-    email: $email
-    notes: $notes
-    updatedBy: $updatedBy
-  ) {
-    file {
-      request_uuid
-      file_name
-      file_url
-    }
-  }
-}
-```
+| Code | Description | Resolution |
+|------|-------------|------------|
+| INVALID_UUID | UUID format invalid | Ensure UUID follows standard format |
+| NOT_FOUND | Resource not found | Verify UUID exists |
+| VALIDATION_ERROR | Input validation failed | Check required fields |
+| QUOTE_LOCKED | Quote cannot be modified | Items locked after creation |
+| DUPLICATE_ENTRY | Entry already exists | Use update instead |
+| EXPIRED_REQUEST | Request past expiration | Update expiredAt date |
 
 ---
 
-### Segment Mutations
+## Notes
 
-#### `insertUpdateSegment`
-Create or update segment.
+1. **Quote Item Modification**: After quote creation, items cannot be added or deleted. To modify items, update the request and create a new quote.
 
-```graphql
-mutation CreateSegment(
-  $segmentUuid: String
-  $providerCorpExternalId: String!
-  $segmentName: String!
-  $segmentDescription: String
-  $updatedBy: String!
-) {
-  insertUpdateSegment(
-    segmentUuid: $segmentUuid
-    providerCorpExternalId: $providerCorpExternalId
-    segmentName: $segmentName
-    segmentDescription: $segmentDescription
-    updatedBy: $updatedBy
-  ) {
-    segment {
-      segment_uuid
-      segment_name
-    }
-  }
-}
-```
+2. **Discount Updates**: Quote item discounts can be updated after creation using `insertUpdateQuoteItem`.
 
-#### `insertUpdateSegmentContact`
-Add contact to segment.
+3. **Pricing Calculation**: The backend automatically recalculates `totalQuoteAmount` when quote items or metadata (shipping, tax) are updated.
 
-```graphql
-mutation AddContactToSegment(
-  $segmentUuid: String!
-  $contactUuid: String!
-  $email: String!
-  $consumerCorpExternalId: String
-  $updatedBy: String!
-) {
-  insertUpdateSegmentContact(
-    segmentUuid: $segmentUuid
-    contactUuid: $contactUuid
-    email: $email
-    consumerCorpExternalId: $consumerCorpExternalId
-    updatedBy: $updatedBy
-  ) {
-    segmentContact {
-      segment_uuid
-      contact_uuid
-      email
-    }
-  }
-}
-```
+4. **Date Format**: All dates use ISO 8601 format (e.g., "2025-12-31T23:59:59Z").
 
----
+5. **Currency**: All monetary values are in the configured default currency (USD by default).
 
-## MCP Tool to GraphQL Mapping
-
-| MCP Tool | GraphQL Operation | Type | Operation Name |
-|----------|-------------------|------|----------------|
-| submit_rfq_request | Mutation | insertUpdateRequest | insertUpdateRequest |
-| get_rfq_request | Query | request | request |
-| search_rfq_requests | Query | requestList | requestList |
-| search_items | Query | itemList | itemList |
-| get_item | Query | item | item |
-| get_provider_items | Query | providerItemList | providerItemList |
-| get_provider_item_batches | Query | providerItemBatchList | providerItemBatchList |
-| create_quote | Mutation | insertUpdateQuote | insertUpdateQuote |
-| get_quote | Query | quote | quote |
-| update_quote_status | Mutation | insertUpdateQuote | insertUpdateQuote |
-| search_quotes | Query | quoteList | quoteList |
-| add_quote_item | Mutation | insertUpdateQuoteItem | insertUpdateQuoteItem |
-| update_quote_item | Mutation | insertUpdateQuoteItem | insertUpdateQuoteItem |
-| delete_quote_item | Mutation | deleteQuoteItem | deleteQuoteItem |
-| get_item_price_tiers | Query | itemPriceTierList | itemPriceTierList |
-| get_discount_rules | Query | discountRuleList | discountRuleList |
-| calculate_quote_pricing | Custom | Multiple queries | (business logic) |
-| create_installment | Mutation | insertUpdateInstallment | insertUpdateInstallment |
-| get_installments | Query | installmentList | installmentList |
-| upload_rfq_file | Mutation | insertUpdateFile | insertUpdateFile |
-| get_rfq_files | Query | fileList | fileList |
-| create_segment | Mutation | insertUpdateSegment | insertUpdateSegment |
-| add_contact_to_segment | Mutation | insertUpdateSegmentContact | insertUpdateSegmentContact |
-| get_segment_contacts | Query | segmentContactList | segmentContactList |
-
----
-
-## Error Handling
-
-### GraphQL Error Response Format
-
-```json
-{
-  "errors": [
-    {
-      "message": "Error description",
-      "locations": [{"line": 2, "column": 3}],
-      "path": ["operationName"]
-    }
-  ]
-}
-```
-
-### Common Error Codes
-
-- **400**: Bad Request - Invalid input parameters
-- **401**: Unauthorized - Invalid AWS credentials
-- **403**: Forbidden - Insufficient permissions
-- **404**: Not Found - Resource does not exist
-- **500**: Internal Server Error - Server-side error
-- **503**: Service Unavailable - Lambda timeout or unavailable
-
-### MCP Tool Error Response
-
-```json
-{
-  "error": {
-    "code": "GRAPHQL_ERROR",
-    "message": "Failed to execute GraphQL query",
-    "details": "Original GraphQL error message"
-  }
-}
-```
-
----
-
-## Performance Considerations
-
-### Query Optimization
-- Use pagination for list queries (default limit: 50)
-- Request only required fields
-- Cache GraphQL schemas (implemented)
-- Batch related queries when possible
-
-### Recommended Limits
-- **Item List**: 50-100 items per page
-- **Request List**: 20-50 requests per page
-- **Quote List**: 20-50 quotes per page
-- **Quote Items**: 100 items per quote
-
-### Timeout Configuration
-- Default Lambda timeout: 120 seconds
-- Recommended timeout for complex queries: 60 seconds
-- Retry strategy: Exponential backoff (3 attempts)
-
----
-
-## Version History
-
-| Version | Date | Changes |
-|---------|------|---------|
-| 0.1.0 | 2025-11-05 | Initial API reference |
+6. **Pagination**: Default page limit is 50. Use `pageNumber` and `limit` for pagination.

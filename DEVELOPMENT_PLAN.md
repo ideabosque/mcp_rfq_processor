@@ -267,12 +267,11 @@ MCP_CONFIGURATION = {
             "package_name": "mcp_rfq_processor",
             "module_name": "mcp_rfq_processor",
             "class_name": "MCPRfqProcessor",
-            "setting": {
-                "keyword": "rfq",
-                "ai_rfq_function_name": "ai_rfq_graphql",
-                "default_currency": "USD",
-                "default_page_limit": 50,
-            },
+                "setting": {
+                    "keyword": "rfq",
+                    "default_currency": "USD",
+                    "default_page_limit": 50,
+                },
         }
     ],
 }
