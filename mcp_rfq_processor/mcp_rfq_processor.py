@@ -5,850 +5,13 @@ from __future__ import annotations
 __author__ = "bibow"
 
 import logging
-import re
 import traceback
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import boto3
 import humps
-import pendulum
+
 from silvaengine_utility import Utility
-
-
-class MCPRfqProcessor:
-    def __init__(self, logger: logging.Logger, **setting: Dict[str, Any]):
-        self.logger = logger
-        self.setting = setting
-        self._endpoint_id = None
-        self._schemas = {}
-        self._aws_lambda = self._initialize_aws_lambda_client(**setting)
-
-    @property
-    def endpoint_id(self) -> str:
-        return self._endpoint_id
-
-    @endpoint_id.setter
-    def endpoint_id(self, value: str):
-        self._endpoint_id = value
-
-    def _initialize_aws_lambda_client(self, **setting: Dict[str, Any]) -> boto3.client:
-        region_name = setting.get("region_name")
-        aws_access_key_id = setting.get("aws_access_key_id")
-        aws_secret_access_key = setting.get("aws_secret_access_key")
-        if region_name and aws_access_key_id and aws_secret_access_key:
-            return boto3.client(
-                "lambda",
-                region_name=region_name,
-                aws_access_key_id=aws_access_key_id,
-                aws_secret_access_key=aws_secret_access_key,
-            )
-        else:
-            return boto3.client("lambda")
-
-    def _fetch_graphql_schema(
-        self,
-        function_name: str,
-    ) -> Dict[str, Any]:
-        try:
-            if self._schemas.get(function_name) is None:
-                self._schemas[function_name] = Utility.fetch_graphql_schema(
-                    self.logger,
-                    self.endpoint_id,
-                    function_name,
-                    setting=self.setting,
-                    execute_mode=self.setting.get("execute_mode"),
-                    aws_lambda=self._aws_lambda,
-                )
-            return self._schemas[function_name]
-        except Exception as e:
-            log = traceback.format_exc()
-            self.logger.error(log)
-            raise Exception(
-                f"Failed to fetch GraphQL schema: {function_name}/{self.endpoint_id}. Please check the configuration and ensure all required settings are properly. Error: {e}"
-            )
-
-    def _execute_graphql_query(
-        self,
-        function_name: str,
-        operation_name: str,
-        operation_type: str,
-        variables: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        try:
-            schema = self._fetch_graphql_schema(function_name)
-            query = Utility.generate_graphql_operation(
-                operation_name, operation_type, schema
-            )
-            self.logger.info(f"Query: {query}/{function_name}")
-            return Utility.execute_graphql_query(
-                self.logger,
-                self.endpoint_id,
-                function_name,
-                query,
-                variables,
-                setting=self.setting,
-                execute_mode=self.setting.get("execute_mode"),
-                aws_lambda=self._aws_lambda,
-            )
-        except Exception as e:
-            log = traceback.format_exc()
-            self.logger.error(log)
-            raise Exception(
-                f"Failed to execute GraphQL query ({function_name}/{self.endpoint_id}). Error: {e}"
-            )
-
-    # ==================== Request Management Tools ====================
-
-    def submit_rfq_request(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Submit new RFQ request.
-        Maps to GraphQL: insertUpdateRequest mutation
-        """
-        try:
-            self.logger.info(f"Submitting RFQ request: {arguments}")
-
-            variables = {
-                "contactUuid": arguments["contact_uuid"],
-                "requestTitle": arguments["request_title"],
-                "requestDescription": arguments.get("request_description", ""),
-                "expiredAt": arguments.get("expired_at"),
-                "status": arguments.get("status", "pending"),
-                "updatedBy": "MCP",
-            }
-
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "insertUpdateRequest",
-                "Mutation",
-                variables,
-            )
-
-            request = humps.decamelize(result["insertUpdateRequest"]["request"])
-
-            return {
-                "request_uuid": request["request_uuid"],
-                "status": request["status"],
-                "created_at": request["created_at"],
-            }
-        except Exception as e:
-            self.logger.error(f"Failed to submit RFQ: {e}")
-            raise
-
-    def update_rfq_request(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Update existing RFQ request.
-        Maps to GraphQL: insertUpdateRequest mutation
-
-        Use this when:
-        - Modifying request details
-        - Changing requested items (requires creating new quote)
-        - Updating deadline or description
-        """
-        try:
-            self.logger.info(f"Updating RFQ request: {arguments}")
-
-            variables = {
-                "requestUuid": arguments["request_uuid"],
-                "contactUuid": arguments.get("contact_uuid"),
-                "requestTitle": arguments.get("request_title"),
-                "requestDescription": arguments.get("request_description"),
-                "expiredAt": arguments.get("expired_at"),
-                "status": arguments.get("status"),
-                "updatedBy": "MCP",
-            }
-
-            # Remove None values to only update provided fields
-            variables = {k: v for k, v in variables.items() if v is not None}
-
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "insertUpdateRequest",
-                "Mutation",
-                variables,
-            )
-
-            request = humps.decamelize(result["insertUpdateRequest"]["request"])
-
-            return {
-                "request_uuid": request["request_uuid"],
-                "status": request["status"],
-                "updated_at": request["updated_at"],
-            }
-        except Exception as e:
-            self.logger.error(f"Failed to update RFQ: {e}")
-            raise
-
-    def get_rfq_request(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Retrieve RFQ request details.
-        Maps to GraphQL: request query
-        """
-        try:
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "request",
-                "Query",
-                {"requestUuid": arguments["request_uuid"]},
-            )
-
-            return humps.decamelize(result["request"])
-        except Exception as e:
-            self.logger.error(f"Failed to get request: {e}")
-            raise
-
-    def search_rfq_requests(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Search RFQ requests with filters.
-        Maps to GraphQL: requestList query
-        """
-        try:
-            variables = {
-                "pageNumber": arguments.get("page_number", 1),
-                "limit": arguments.get("limit", 20),
-                "contactUuid": arguments.get("contact_uuid"),
-                "statuses": arguments.get("statuses"),
-                "fromExpiredAt": arguments.get("from_expired_at"),
-                "toExpiredAt": arguments.get("to_expired_at"),
-            }
-
-            # Remove None values
-            variables = {k: v for k, v in variables.items() if v is not None}
-
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "requestList",
-                "Query",
-                variables,
-            )
-
-            return humps.decamelize(result["requestList"])
-        except Exception as e:
-            self.logger.error(f"Failed to search requests: {e}")
-            raise
-
-    # ==================== Item Management Tools ====================
-
-    def search_items(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Search items catalog.
-        Maps to GraphQL: itemList query
-        """
-        try:
-            variables = {
-                "pageNumber": arguments.get("page_number", 1),
-                "limit": arguments.get("limit", 50),
-                "itemType": arguments.get("item_type"),
-                "itemName": arguments.get("item_name"),
-                "uoms": arguments.get("uoms"),
-            }
-
-            variables = {k: v for k, v in variables.items() if v is not None}
-
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "itemList",
-                "Query",
-                variables,
-            )
-
-            return humps.decamelize(result["itemList"])
-        except Exception as e:
-            self.logger.error(f"Failed to search items: {e}")
-            raise
-
-    def get_item(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Get item details.
-        Maps to GraphQL: item query
-        """
-        try:
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "item",
-                "Query",
-                {"itemUuid": arguments["item_uuid"]},
-            )
-
-            return humps.decamelize(result["item"])
-        except Exception as e:
-            self.logger.error(f"Failed to get item: {e}")
-            raise
-
-    def get_provider_items(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Search provider inventory.
-        Maps to GraphQL: providerItemList query
-        """
-        try:
-            variables = {
-                "pageNumber": arguments.get("page_number", 1),
-                "limit": arguments.get("limit", 50),
-                "itemUuid": arguments.get("item_uuid"),
-                "providerCorpExternalId": arguments.get("provider_corp_external_id"),
-                "minBasePricePerUom": arguments.get("min_base_price_per_uom"),
-                "maxBasePricePerUom": arguments.get("max_base_price_per_uom"),
-            }
-
-            variables = {k: v for k, v in variables.items() if v is not None}
-
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "providerItemList",
-                "Query",
-                variables,
-            )
-
-            return humps.decamelize(result["providerItemList"])
-        except Exception as e:
-            self.logger.error(f"Failed to get provider items: {e}")
-            raise
-
-    def get_provider_item_batches(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Get batch information for provider items.
-        Maps to GraphQL: providerItemBatchList query
-        """
-        try:
-            variables = {
-                "pageNumber": arguments.get("page_number", 1),
-                "limit": arguments.get("limit", 50),
-                "providerItemUuid": arguments.get("provider_item_uuid"),
-                "batchNumber": arguments.get("batch_number"),
-            }
-
-            variables = {k: v for k, v in variables.items() if v is not None}
-
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "providerItemBatchList",
-                "Query",
-                variables,
-            )
-
-            return humps.decamelize(result["providerItemBatchList"])
-        except Exception as e:
-            self.logger.error(f"Failed to get provider item batches: {e}")
-            raise
-
-    # ==================== Quote Management Tools ====================
-
-    def create_quote(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Create new quote for RFQ request.
-        Maps to GraphQL: insertUpdateQuote mutation
-
-        Note: After creation, quote items cannot be added/deleted.
-        To change items, update the request and create a new quote.
-        """
-        try:
-            self.logger.info(f"Creating quote: {arguments}")
-
-            variables = {
-                "requestUuid": arguments["request_uuid"],
-                "providerCorpExternalId": arguments["provider_corp_external_id"],
-                "shippingMethod": arguments.get("shipping_method", "standard"),
-                "shippingAmount": arguments.get("shipping_amount", 0.0),
-                "taxAmount": arguments.get("tax_amount", 0.0),
-                "status": arguments.get("status", "draft"),
-                "notes": arguments.get("notes", ""),
-                "items": arguments.get("items", []),
-                "updatedBy": "MCP",
-            }
-
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "insertUpdateQuote",
-                "Mutation",
-                variables,
-            )
-
-            quote = humps.decamelize(result["insertUpdateQuote"]["quote"])
-
-            return {
-                "quote_uuid": quote["quote_uuid"],
-                "request_uuid": quote["request_uuid"],
-                "total_quote_amount": quote["total_quote_amount"],
-                "status": quote["status"],
-            }
-        except Exception as e:
-            self.logger.error(f"Failed to create quote: {e}")
-            raise
-
-    def update_quote(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Update quote metadata (shipping, tax, status, notes).
-        Maps to GraphQL: insertUpdateQuote mutation
-
-        Can update:
-        - shippingMethod, shippingAmount
-        - taxAmount
-        - status
-        - notes
-
-        Cannot modify quote items - use update_quote_item_discount instead
-        """
-        try:
-            self.logger.info(f"Updating quote: {arguments}")
-
-            variables = {
-                "quoteUuid": arguments["quote_uuid"],
-                "shippingMethod": arguments.get("shipping_method"),
-                "shippingAmount": arguments.get("shipping_amount"),
-                "taxAmount": arguments.get("tax_amount"),
-                "status": arguments.get("status"),
-                "notes": arguments.get("notes"),
-                "updatedBy": "MCP",
-            }
-
-            # Remove None values to only update provided fields
-            variables = {k: v for k, v in variables.items() if v is not None}
-
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "insertUpdateQuote",
-                "Mutation",
-                variables,
-            )
-
-            quote = humps.decamelize(result["insertUpdateQuote"]["quote"])
-
-            return {
-                "quote_uuid": quote["quote_uuid"],
-                "total_quote_amount": quote["total_quote_amount"],
-                "status": quote["status"],
-                "updated_at": quote["updated_at"],
-            }
-        except Exception as e:
-            self.logger.error(f"Failed to update quote: {e}")
-            raise
-
-    def update_quote_item_discount(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Update discount for a specific quote item.
-        Maps to GraphQL: insertUpdateQuoteItem mutation
-
-        This is the ONLY allowed modification to quote items after creation.
-        To add/remove items, update the request and create a new quote.
-        """
-        try:
-            self.logger.info(f"Updating quote item discount: {arguments}")
-
-            variables = {
-                "quoteItemUuid": arguments["quote_item_uuid"],
-                "discountAmount": arguments.get("discount_amount", 0.0),
-                "discountPercent": arguments.get("discount_percent", 0.0),
-                "discountNotes": arguments.get("discount_notes", ""),
-                "updatedBy": "MCP",
-            }
-
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "insertUpdateQuoteItem",
-                "Mutation",
-                variables,
-            )
-
-            quote_item = humps.decamelize(result["insertUpdateQuoteItem"]["quoteItem"])
-
-            return {
-                "quote_item_uuid": quote_item["quote_item_uuid"],
-                "discount_amount": quote_item["discount_amount"],
-                "discount_percent": quote_item["discount_percent"],
-                "total_amount": quote_item["total_amount"],
-            }
-        except Exception as e:
-            self.logger.error(f"Failed to update quote item discount: {e}")
-            raise
-
-    def get_quote(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Retrieve quote details.
-        Maps to GraphQL: quote query
-        """
-        try:
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "quote",
-                "Query",
-                {"quoteUuid": arguments["quote_uuid"]},
-            )
-
-            return humps.decamelize(result["quote"])
-        except Exception as e:
-            self.logger.error(f"Failed to get quote: {e}")
-            raise
-
-    def search_quotes(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Search quotes with filters.
-        Maps to GraphQL: quoteList query
-        """
-        try:
-            variables = {
-                "pageNumber": arguments.get("page_number", 1),
-                "limit": arguments.get("limit", 20),
-                "requestUuid": arguments.get("request_uuid"),
-                "providerCorpExternalId": arguments.get("provider_corp_external_id"),
-                "statuses": arguments.get("statuses"),
-                "fromCreatedAt": arguments.get("from_created_at"),
-                "toCreatedAt": arguments.get("to_created_at"),
-            }
-
-            variables = {k: v for k, v in variables.items() if v is not None}
-
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "quoteList",
-                "Query",
-                variables,
-            )
-
-            return humps.decamelize(result["quoteList"])
-        except Exception as e:
-            self.logger.error(f"Failed to search quotes: {e}")
-            raise
-
-    # ==================== Pricing Tools ====================
-
-    def get_item_price_tiers(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Get tiered pricing for items.
-        Maps to GraphQL: itemPriceTierList query
-        """
-        try:
-            variables = {
-                "pageNumber": arguments.get("page_number", 1),
-                "limit": arguments.get("limit", 50),
-                "itemUuid": arguments.get("item_uuid"),
-                "segmentUuid": arguments.get("segment_uuid"),
-                "minQuantity": arguments.get("min_quantity"),
-            }
-
-            variables = {k: v for k, v in variables.items() if v is not None}
-
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "itemPriceTierList",
-                "Query",
-                variables,
-            )
-
-            return humps.decamelize(result["itemPriceTierList"])
-        except Exception as e:
-            self.logger.error(f"Failed to get item price tiers: {e}")
-            raise
-
-    def get_discount_rules(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Get discount rules.
-        Maps to GraphQL: discountRuleList query
-        """
-        try:
-            variables = {
-                "pageNumber": arguments.get("page_number", 1),
-                "limit": arguments.get("limit", 50),
-                "itemUuid": arguments.get("item_uuid"),
-                "segmentUuid": arguments.get("segment_uuid"),
-                "validFrom": arguments.get("valid_from"),
-                "validTo": arguments.get("valid_to"),
-            }
-
-            variables = {k: v for k, v in variables.items() if v is not None}
-
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "discountRuleList",
-                "Query",
-                variables,
-            )
-
-            return humps.decamelize(result["discountRuleList"])
-        except Exception as e:
-            self.logger.error(f"Failed to get discount rules: {e}")
-            raise
-
-    def calculate_quote_pricing(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Calculate final pricing for a quote with discounts and tiers.
-        This is a business logic method that combines multiple GraphQL queries.
-        """
-        try:
-            self.logger.info(f"Calculating quote pricing: {arguments}")
-
-            # Get the quote details
-            quote = self.get_quote(quote_uuid=arguments["quote_uuid"])
-
-            # For each quote item, get applicable discounts
-            quote_items = quote.get("quote_items", [])
-            pricing_details = []
-
-            for item in quote_items:
-                # Get discount rules for this item
-                discount_rules = self.get_discount_rules(
-                    item_uuid=item["item_uuid"],
-                    segment_uuid=arguments.get("segment_uuid"),
-                )
-
-                # Get price tiers
-                price_tiers = self.get_item_price_tiers(
-                    item_uuid=item["item_uuid"],
-                    segment_uuid=arguments.get("segment_uuid"),
-                    min_quantity=item["quantity"],
-                )
-
-                pricing_details.append(
-                    {
-                        "quote_item_uuid": item["quote_item_uuid"],
-                        "item_uuid": item["item_uuid"],
-                        "quantity": item["quantity"],
-                        "unit_price": item["unit_price"],
-                        "applicable_discounts": discount_rules.get(
-                            "discount_rules", []
-                        ),
-                        "applicable_price_tiers": price_tiers.get(
-                            "item_price_tiers", []
-                        ),
-                        "current_total": item["total_amount"],
-                    }
-                )
-
-            return {
-                "quote_uuid": quote["quote_uuid"],
-                "pricing_details": pricing_details,
-                "quote_total": quote["total_quote_amount"],
-            }
-        except Exception as e:
-            self.logger.error(f"Failed to calculate quote pricing: {e}")
-            raise
-
-    # ==================== Installment Tools ====================
-
-    def create_installment(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Create payment installment.
-        Maps to GraphQL: insertUpdateInstallment mutation
-        """
-        try:
-            self.logger.info(f"Creating installment: {arguments}")
-
-            variables = {
-                "quoteUuid": arguments["quote_uuid"],
-                "installmentNumber": arguments["installment_number"],
-                "dueDate": arguments["due_date"],
-                "amount": arguments["amount"],
-                "status": arguments.get("status", "pending"),
-                "updatedBy": "MCP",
-            }
-
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "insertUpdateInstallment",
-                "Mutation",
-                variables,
-            )
-
-            installment = humps.decamelize(
-                result["insertUpdateInstallment"]["installment"]
-            )
-
-            return {
-                "installment_uuid": installment["installment_uuid"],
-                "quote_uuid": installment["quote_uuid"],
-                "installment_number": installment["installment_number"],
-                "due_date": installment["due_date"],
-                "amount": installment["amount"],
-                "status": installment["status"],
-            }
-        except Exception as e:
-            self.logger.error(f"Failed to create installment: {e}")
-            raise
-
-    def get_installments(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Get installment schedule.
-        Maps to GraphQL: installmentList query
-        """
-        try:
-            variables = {
-                "pageNumber": arguments.get("page_number", 1),
-                "limit": arguments.get("limit", 50),
-                "quoteUuid": arguments.get("quote_uuid"),
-                "statuses": arguments.get("statuses"),
-            }
-
-            variables = {k: v for k, v in variables.items() if v is not None}
-
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "installmentList",
-                "Query",
-                variables,
-            )
-
-            return humps.decamelize(result["installmentList"])
-        except Exception as e:
-            self.logger.error(f"Failed to get installments: {e}")
-            raise
-
-    # ==================== File Tools ====================
-
-    def upload_rfq_file(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Upload RFQ document.
-        Maps to GraphQL: insertUpdateFile mutation
-        """
-        try:
-            self.logger.info(f"Uploading RFQ file: {arguments}")
-
-            variables = {
-                "requestUuid": arguments["request_uuid"],
-                "fileName": arguments["file_name"],
-                "fileType": arguments["file_type"],
-                "fileData": arguments["file_data"],
-                "updatedBy": "MCP",
-            }
-
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "insertUpdateFile",
-                "Mutation",
-                variables,
-            )
-
-            file_obj = humps.decamelize(result["insertUpdateFile"]["file"])
-
-            return {
-                "file_uuid": file_obj["file_uuid"],
-                "request_uuid": file_obj["request_uuid"],
-                "file_name": file_obj["file_name"],
-                "file_url": file_obj.get("file_url", ""),
-            }
-        except Exception as e:
-            self.logger.error(f"Failed to upload RFQ file: {e}")
-            raise
-
-    def get_rfq_files(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Get RFQ files.
-        Maps to GraphQL: fileList query
-        """
-        try:
-            variables = {
-                "pageNumber": arguments.get("page_number", 1),
-                "limit": arguments.get("limit", 50),
-                "requestUuid": arguments.get("request_uuid"),
-                "fileType": arguments.get("file_type"),
-            }
-
-            variables = {k: v for k, v in variables.items() if v is not None}
-
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "fileList",
-                "Query",
-                variables,
-            )
-
-            return humps.decamelize(result["fileList"])
-        except Exception as e:
-            self.logger.error(f"Failed to get RFQ files: {e}")
-            raise
-
-    # ==================== Segment Tools ====================
-
-    def create_segment(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Create pricing segment.
-        Maps to GraphQL: insertUpdateSegment mutation
-        """
-        try:
-            self.logger.info(f"Creating segment: {arguments}")
-
-            variables = {
-                "segmentName": arguments["segment_name"],
-                "segmentDescription": arguments.get("segment_description", ""),
-                "updatedBy": "MCP",
-            }
-
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "insertUpdateSegment",
-                "Mutation",
-                variables,
-            )
-
-            segment = humps.decamelize(result["insertUpdateSegment"]["segment"])
-
-            return {
-                "segment_uuid": segment["segment_uuid"],
-                "segment_name": segment["segment_name"],
-                "segment_description": segment.get("segment_description", ""),
-            }
-        except Exception as e:
-            self.logger.error(f"Failed to create segment: {e}")
-            raise
-
-    def add_contact_to_segment(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Add contact to segment.
-        Maps to GraphQL: insertUpdateSegmentContact mutation
-        """
-        try:
-            self.logger.info(f"Adding contact to segment: {arguments}")
-
-            variables = {
-                "segmentUuid": arguments["segment_uuid"],
-                "contactUuid": arguments["contact_uuid"],
-                "updatedBy": "MCP",
-            }
-
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "insertUpdateSegmentContact",
-                "Mutation",
-                variables,
-            )
-
-            segment_contact = humps.decamelize(
-                result["insertUpdateSegmentContact"]["segmentContact"]
-            )
-
-            return {
-                "segment_contact_uuid": segment_contact["segment_contact_uuid"],
-                "segment_uuid": segment_contact["segment_uuid"],
-                "contact_uuid": segment_contact["contact_uuid"],
-            }
-        except Exception as e:
-            self.logger.error(f"Failed to add contact to segment: {e}")
-            raise
-
-    def get_segment_contacts(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        List segment contacts.
-        Maps to GraphQL: segmentContactList query
-        """
-        try:
-            variables = {
-                "pageNumber": arguments.get("page_number", 1),
-                "limit": arguments.get("limit", 50),
-                "segmentUuid": arguments.get("segment_uuid"),
-                "contactUuid": arguments.get("contact_uuid"),
-            }
-
-            variables = {k: v for k, v in variables.items() if v is not None}
-
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "segmentContactList",
-                "Query",
-                variables,
-            )
-
-            return humps.decamelize(result["segmentContactList"])
-        except Exception as e:
-            self.logger.error(f"Failed to get segment contacts: {e}")
-            raise
-
 
 # MCP Configuration
 MCP_CONFIGURATION = {
@@ -1494,8 +657,6 @@ MCP_CONFIGURATION = {
             },
         },
     ],
-    "resources": [],
-    "prompts": [],
     "module_links": [
         # Request Management Tools
         {
@@ -1694,11 +855,865 @@ MCP_CONFIGURATION = {
             "package_name": "mcp_rfq_processor",
             "module_name": "mcp_rfq_processor",
             "class_name": "MCPRfqProcessor",
-                "setting": {
-                    "keyword": "rfq",
-                    "default_currency": "USD",
-                    "default_page_limit": 50,
-                },
+            "setting": {},
         }
     ],
 }
+
+
+class MCPRfqProcessor:
+    def __init__(self, logger: logging.Logger, **setting: Dict[str, Any]):
+        self.logger = logger
+        self.setting = setting
+        self._endpoint_id = None
+        self._schemas = {}
+        self._aws_lambda = self._initialize_aws_lambda_client(**setting)
+
+    @property
+    def endpoint_id(self) -> str:
+        return self._endpoint_id
+
+    @endpoint_id.setter
+    def endpoint_id(self, value: str):
+        self._endpoint_id = value
+
+    def _initialize_aws_lambda_client(self, **setting: Dict[str, Any]) -> boto3.client:
+        region_name = setting.get("region_name")
+        aws_access_key_id = setting.get("aws_access_key_id")
+        aws_secret_access_key = setting.get("aws_secret_access_key")
+        if region_name and aws_access_key_id and aws_secret_access_key:
+            return boto3.client(
+                "lambda",
+                region_name=region_name,
+                aws_access_key_id=aws_access_key_id,
+                aws_secret_access_key=aws_secret_access_key,
+            )
+        else:
+            return boto3.client("lambda")
+
+    def _fetch_graphql_schema(
+        self,
+        function_name: str,
+    ) -> Dict[str, Any]:
+        try:
+            if self._schemas.get(function_name) is None:
+                self._schemas[function_name] = Utility.fetch_graphql_schema(
+                    self.logger,
+                    self.endpoint_id,
+                    function_name,
+                    setting=self.setting,
+                    execute_mode=self.setting.get("execute_mode"),
+                    aws_lambda=self._aws_lambda,
+                )
+            return self._schemas[function_name]
+        except Exception as e:
+            log = traceback.format_exc()
+            self.logger.error(log)
+            raise Exception(
+                f"Failed to fetch GraphQL schema: {function_name}/{self.endpoint_id}. Please check the configuration and ensure all required settings are properly. Error: {e}"
+            )
+
+    def _execute_graphql_query(
+        self,
+        function_name: str,
+        operation_name: str,
+        operation_type: str,
+        variables: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        try:
+            schema = self._fetch_graphql_schema(function_name)
+            query = Utility.generate_graphql_operation(
+                operation_name, operation_type, schema
+            )
+            self.logger.info(f"Query: {query}/{function_name}")
+            return Utility.execute_graphql_query(
+                self.logger,
+                self.endpoint_id,
+                function_name,
+                query,
+                variables,
+                setting=self.setting,
+                execute_mode=self.setting.get("execute_mode"),
+                aws_lambda=self._aws_lambda,
+            )
+        except Exception as e:
+            log = traceback.format_exc()
+            self.logger.error(log)
+            raise Exception(
+                f"Failed to execute GraphQL query ({function_name}/{self.endpoint_id}). Error: {e}"
+            )
+
+    # ==================== Request Management Tools ====================
+
+    # * MCP Function.
+    def submit_rfq_request(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Submit new RFQ request.
+        Maps to GraphQL: insertUpdateRequest mutation
+        """
+        try:
+            self.logger.info(f"Submitting RFQ request: {arguments}")
+
+            variables = {
+                "contactUuid": arguments["contact_uuid"],
+                "requestTitle": arguments["request_title"],
+                "requestDescription": arguments.get("request_description", ""),
+                "expiredAt": arguments.get("expired_at"),
+                "status": arguments.get("status", "pending"),
+                "updatedBy": "MCP",
+            }
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "insertUpdateRequest",
+                "Mutation",
+                variables,
+            )
+
+            request = humps.decamelize(result["insertUpdateRequest"]["request"])
+
+            return {
+                "request_uuid": request["request_uuid"],
+                "status": request["status"],
+                "created_at": request["created_at"],
+            }
+        except Exception as e:
+            self.logger.error(f"Failed to submit RFQ: {e}")
+            raise
+
+    # * MCP Function.
+    def update_rfq_request(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Update existing RFQ request.
+        Maps to GraphQL: insertUpdateRequest mutation
+
+        Use this when:
+        - Modifying request details
+        - Changing requested items (requires creating new quote)
+        - Updating deadline or description
+        """
+        try:
+            self.logger.info(f"Updating RFQ request: {arguments}")
+
+            variables = {
+                "requestUuid": arguments["request_uuid"],
+                "contactUuid": arguments.get("contact_uuid"),
+                "requestTitle": arguments.get("request_title"),
+                "requestDescription": arguments.get("request_description"),
+                "expiredAt": arguments.get("expired_at"),
+                "status": arguments.get("status"),
+                "updatedBy": "MCP",
+            }
+
+            # Remove None values to only update provided fields
+            variables = {k: v for k, v in variables.items() if v is not None}
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "insertUpdateRequest",
+                "Mutation",
+                variables,
+            )
+
+            request = humps.decamelize(result["insertUpdateRequest"]["request"])
+
+            return {
+                "request_uuid": request["request_uuid"],
+                "status": request["status"],
+                "updated_at": request["updated_at"],
+            }
+        except Exception as e:
+            self.logger.error(f"Failed to update RFQ: {e}")
+            raise
+
+    # * MCP Function.
+    def get_rfq_request(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Retrieve RFQ request details.
+        Maps to GraphQL: request query
+        """
+        try:
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "request",
+                "Query",
+                {"requestUuid": arguments["request_uuid"]},
+            )
+
+            return humps.decamelize(result["request"])
+        except Exception as e:
+            self.logger.error(f"Failed to get request: {e}")
+            raise
+
+    # * MCP Function.
+    def search_rfq_requests(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Search RFQ requests with filters.
+        Maps to GraphQL: requestList query
+        """
+        try:
+            variables = {
+                "pageNumber": arguments.get("page_number", 1),
+                "limit": arguments.get("limit", 20),
+                "contactUuid": arguments.get("contact_uuid"),
+                "statuses": arguments.get("statuses"),
+                "fromExpiredAt": arguments.get("from_expired_at"),
+                "toExpiredAt": arguments.get("to_expired_at"),
+            }
+
+            # Remove None values
+            variables = {k: v for k, v in variables.items() if v is not None}
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "requestList",
+                "Query",
+                variables,
+            )
+
+            return humps.decamelize(result["requestList"])
+        except Exception as e:
+            self.logger.error(f"Failed to search requests: {e}")
+            raise
+
+    # ==================== Item Management Tools ====================
+
+    # * MCP Function.
+    def search_items(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Search items catalog.
+        Maps to GraphQL: itemList query
+        """
+        try:
+            variables = {
+                "pageNumber": arguments.get("page_number", 1),
+                "limit": arguments.get("limit", 50),
+                "itemType": arguments.get("item_type"),
+                "itemName": arguments.get("item_name"),
+                "uoms": arguments.get("uoms"),
+            }
+
+            variables = {k: v for k, v in variables.items() if v is not None}
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "itemList",
+                "Query",
+                variables,
+            )
+
+            return humps.decamelize(result["itemList"])
+        except Exception as e:
+            self.logger.error(f"Failed to search items: {e}")
+            raise
+
+    # * MCP Function.
+    def get_item(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Get item details.
+        Maps to GraphQL: item query
+        """
+        try:
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "item",
+                "Query",
+                {"itemUuid": arguments["item_uuid"]},
+            )
+
+            return humps.decamelize(result["item"])
+        except Exception as e:
+            self.logger.error(f"Failed to get item: {e}")
+            raise
+
+    # * MCP Function.
+    def get_provider_items(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Search provider inventory.
+        Maps to GraphQL: providerItemList query
+        """
+        try:
+            variables = {
+                "pageNumber": arguments.get("page_number", 1),
+                "limit": arguments.get("limit", 50),
+                "itemUuid": arguments.get("item_uuid"),
+                "providerCorpExternalId": arguments.get("provider_corp_external_id"),
+                "minBasePricePerUom": arguments.get("min_base_price_per_uom"),
+                "maxBasePricePerUom": arguments.get("max_base_price_per_uom"),
+            }
+
+            variables = {k: v for k, v in variables.items() if v is not None}
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "providerItemList",
+                "Query",
+                variables,
+            )
+
+            return humps.decamelize(result["providerItemList"])
+        except Exception as e:
+            self.logger.error(f"Failed to get provider items: {e}")
+            raise
+
+    # * MCP Function.
+    def get_provider_item_batches(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Get batch information for provider items.
+        Maps to GraphQL: providerItemBatchList query
+        """
+        try:
+            variables = {
+                "pageNumber": arguments.get("page_number", 1),
+                "limit": arguments.get("limit", 50),
+                "providerItemUuid": arguments.get("provider_item_uuid"),
+                "batchNumber": arguments.get("batch_number"),
+            }
+
+            variables = {k: v for k, v in variables.items() if v is not None}
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "providerItemBatchList",
+                "Query",
+                variables,
+            )
+
+            return humps.decamelize(result["providerItemBatchList"])
+        except Exception as e:
+            self.logger.error(f"Failed to get provider item batches: {e}")
+            raise
+
+    # ==================== Quote Management Tools ====================
+
+    # * MCP Function.
+    def create_quote(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Create new quote for RFQ request.
+        Maps to GraphQL: insertUpdateQuote mutation
+
+        Note: After creation, quote items cannot be added/deleted.
+        To change items, update the request and create a new quote.
+        """
+        try:
+            self.logger.info(f"Creating quote: {arguments}")
+
+            variables = {
+                "requestUuid": arguments["request_uuid"],
+                "providerCorpExternalId": arguments["provider_corp_external_id"],
+                "shippingMethod": arguments.get("shipping_method", "standard"),
+                "shippingAmount": arguments.get("shipping_amount", 0.0),
+                "taxAmount": arguments.get("tax_amount", 0.0),
+                "status": arguments.get("status", "draft"),
+                "notes": arguments.get("notes", ""),
+                "items": arguments.get("items", []),
+                "updatedBy": "MCP",
+            }
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "insertUpdateQuote",
+                "Mutation",
+                variables,
+            )
+
+            quote = humps.decamelize(result["insertUpdateQuote"]["quote"])
+
+            return {
+                "quote_uuid": quote["quote_uuid"],
+                "request_uuid": quote["request_uuid"],
+                "total_quote_amount": quote["total_quote_amount"],
+                "status": quote["status"],
+            }
+        except Exception as e:
+            self.logger.error(f"Failed to create quote: {e}")
+            raise
+
+    # * MCP Function.
+    def update_quote(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Update quote metadata (shipping, tax, status, notes).
+        Maps to GraphQL: insertUpdateQuote mutation
+
+        Can update:
+        - shippingMethod, shippingAmount
+        - taxAmount
+        - status
+        - notes
+
+        Cannot modify quote items - use update_quote_item_discount instead
+        """
+        try:
+            self.logger.info(f"Updating quote: {arguments}")
+
+            variables = {
+                "quoteUuid": arguments["quote_uuid"],
+                "shippingMethod": arguments.get("shipping_method"),
+                "shippingAmount": arguments.get("shipping_amount"),
+                "taxAmount": arguments.get("tax_amount"),
+                "status": arguments.get("status"),
+                "notes": arguments.get("notes"),
+                "updatedBy": "MCP",
+            }
+
+            # Remove None values to only update provided fields
+            variables = {k: v for k, v in variables.items() if v is not None}
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "insertUpdateQuote",
+                "Mutation",
+                variables,
+            )
+
+            quote = humps.decamelize(result["insertUpdateQuote"]["quote"])
+
+            return {
+                "quote_uuid": quote["quote_uuid"],
+                "total_quote_amount": quote["total_quote_amount"],
+                "status": quote["status"],
+                "updated_at": quote["updated_at"],
+            }
+        except Exception as e:
+            self.logger.error(f"Failed to update quote: {e}")
+            raise
+
+    # * MCP Function.
+    def update_quote_item_discount(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Update discount for a specific quote item.
+        Maps to GraphQL: insertUpdateQuoteItem mutation
+
+        This is the ONLY allowed modification to quote items after creation.
+        To add/remove items, update the request and create a new quote.
+        """
+        try:
+            self.logger.info(f"Updating quote item discount: {arguments}")
+
+            variables = {
+                "quoteItemUuid": arguments["quote_item_uuid"],
+                "discountAmount": arguments.get("discount_amount", 0.0),
+                "discountPercent": arguments.get("discount_percent", 0.0),
+                "discountNotes": arguments.get("discount_notes", ""),
+                "updatedBy": "MCP",
+            }
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "insertUpdateQuoteItem",
+                "Mutation",
+                variables,
+            )
+
+            quote_item = humps.decamelize(result["insertUpdateQuoteItem"]["quoteItem"])
+
+            return {
+                "quote_item_uuid": quote_item["quote_item_uuid"],
+                "discount_amount": quote_item["discount_amount"],
+                "discount_percent": quote_item["discount_percent"],
+                "total_amount": quote_item["total_amount"],
+            }
+        except Exception as e:
+            self.logger.error(f"Failed to update quote item discount: {e}")
+            raise
+
+    # * MCP Function.
+    def get_quote(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Retrieve quote details.
+        Maps to GraphQL: quote query
+        """
+        try:
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "quote",
+                "Query",
+                {"quoteUuid": arguments["quote_uuid"]},
+            )
+
+            return humps.decamelize(result["quote"])
+        except Exception as e:
+            self.logger.error(f"Failed to get quote: {e}")
+            raise
+
+    # * MCP Function.
+    def search_quotes(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Search quotes with filters.
+        Maps to GraphQL: quoteList query
+        """
+        try:
+            variables = {
+                "pageNumber": arguments.get("page_number", 1),
+                "limit": arguments.get("limit", 20),
+                "requestUuid": arguments.get("request_uuid"),
+                "providerCorpExternalId": arguments.get("provider_corp_external_id"),
+                "statuses": arguments.get("statuses"),
+                "fromCreatedAt": arguments.get("from_created_at"),
+                "toCreatedAt": arguments.get("to_created_at"),
+            }
+
+            variables = {k: v for k, v in variables.items() if v is not None}
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "quoteList",
+                "Query",
+                variables,
+            )
+
+            return humps.decamelize(result["quoteList"])
+        except Exception as e:
+            self.logger.error(f"Failed to search quotes: {e}")
+            raise
+
+    # ==================== Pricing Tools ====================
+
+    # * MCP Function.
+    def get_item_price_tiers(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Get tiered pricing for items.
+        Maps to GraphQL: itemPriceTierList query
+        """
+        try:
+            variables = {
+                "pageNumber": arguments.get("page_number", 1),
+                "limit": arguments.get("limit", 50),
+                "itemUuid": arguments.get("item_uuid"),
+                "segmentUuid": arguments.get("segment_uuid"),
+                "minQuantity": arguments.get("min_quantity"),
+            }
+
+            variables = {k: v for k, v in variables.items() if v is not None}
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "itemPriceTierList",
+                "Query",
+                variables,
+            )
+
+            return humps.decamelize(result["itemPriceTierList"])
+        except Exception as e:
+            self.logger.error(f"Failed to get item price tiers: {e}")
+            raise
+
+    # * MCP Function.
+    def get_discount_rules(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Get discount rules.
+        Maps to GraphQL: discountRuleList query
+        """
+        try:
+            variables = {
+                "pageNumber": arguments.get("page_number", 1),
+                "limit": arguments.get("limit", 50),
+                "itemUuid": arguments.get("item_uuid"),
+                "segmentUuid": arguments.get("segment_uuid"),
+                "validFrom": arguments.get("valid_from"),
+                "validTo": arguments.get("valid_to"),
+            }
+
+            variables = {k: v for k, v in variables.items() if v is not None}
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "discountRuleList",
+                "Query",
+                variables,
+            )
+
+            return humps.decamelize(result["discountRuleList"])
+        except Exception as e:
+            self.logger.error(f"Failed to get discount rules: {e}")
+            raise
+
+    # * MCP Function.
+    def calculate_quote_pricing(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Calculate final pricing for a quote with discounts and tiers.
+        This is a business logic method that combines multiple GraphQL queries.
+        """
+        try:
+            self.logger.info(f"Calculating quote pricing: {arguments}")
+
+            # Get the quote details
+            quote = self.get_quote(quote_uuid=arguments["quote_uuid"])
+
+            # For each quote item, get applicable discounts
+            quote_items = quote.get("quote_items", [])
+            pricing_details = []
+
+            for item in quote_items:
+                # Get discount rules for this item
+                discount_rules = self.get_discount_rules(
+                    item_uuid=item["item_uuid"],
+                    segment_uuid=arguments.get("segment_uuid"),
+                )
+
+                # Get price tiers
+                price_tiers = self.get_item_price_tiers(
+                    item_uuid=item["item_uuid"],
+                    segment_uuid=arguments.get("segment_uuid"),
+                    min_quantity=item["quantity"],
+                )
+
+                pricing_details.append(
+                    {
+                        "quote_item_uuid": item["quote_item_uuid"],
+                        "item_uuid": item["item_uuid"],
+                        "quantity": item["quantity"],
+                        "unit_price": item["unit_price"],
+                        "applicable_discounts": discount_rules.get(
+                            "discount_rules", []
+                        ),
+                        "applicable_price_tiers": price_tiers.get(
+                            "item_price_tiers", []
+                        ),
+                        "current_total": item["total_amount"],
+                    }
+                )
+
+            return {
+                "quote_uuid": quote["quote_uuid"],
+                "pricing_details": pricing_details,
+                "quote_total": quote["total_quote_amount"],
+            }
+        except Exception as e:
+            self.logger.error(f"Failed to calculate quote pricing: {e}")
+            raise
+
+    # ==================== Installment Tools ====================
+
+    # * MCP Function.
+    def create_installment(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Create payment installment.
+        Maps to GraphQL: insertUpdateInstallment mutation
+        """
+        try:
+            self.logger.info(f"Creating installment: {arguments}")
+
+            variables = {
+                "quoteUuid": arguments["quote_uuid"],
+                "installmentNumber": arguments["installment_number"],
+                "dueDate": arguments["due_date"],
+                "amount": arguments["amount"],
+                "status": arguments.get("status", "pending"),
+                "updatedBy": "MCP",
+            }
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "insertUpdateInstallment",
+                "Mutation",
+                variables,
+            )
+
+            installment = humps.decamelize(
+                result["insertUpdateInstallment"]["installment"]
+            )
+
+            return {
+                "installment_uuid": installment["installment_uuid"],
+                "quote_uuid": installment["quote_uuid"],
+                "installment_number": installment["installment_number"],
+                "due_date": installment["due_date"],
+                "amount": installment["amount"],
+                "status": installment["status"],
+            }
+        except Exception as e:
+            self.logger.error(f"Failed to create installment: {e}")
+            raise
+
+    # * MCP Function.
+    def get_installments(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Get installment schedule.
+        Maps to GraphQL: installmentList query
+        """
+        try:
+            variables = {
+                "pageNumber": arguments.get("page_number", 1),
+                "limit": arguments.get("limit", 50),
+                "quoteUuid": arguments.get("quote_uuid"),
+                "statuses": arguments.get("statuses"),
+            }
+
+            variables = {k: v for k, v in variables.items() if v is not None}
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "installmentList",
+                "Query",
+                variables,
+            )
+
+            return humps.decamelize(result["installmentList"])
+        except Exception as e:
+            self.logger.error(f"Failed to get installments: {e}")
+            raise
+
+    # ==================== File Tools ====================
+
+    # * MCP Function.
+    def upload_rfq_file(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Upload RFQ document.
+        Maps to GraphQL: insertUpdateFile mutation
+        """
+        try:
+            self.logger.info(f"Uploading RFQ file: {arguments}")
+
+            variables = {
+                "requestUuid": arguments["request_uuid"],
+                "fileName": arguments["file_name"],
+                "fileType": arguments["file_type"],
+                "fileData": arguments["file_data"],
+                "updatedBy": "MCP",
+            }
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "insertUpdateFile",
+                "Mutation",
+                variables,
+            )
+
+            file_obj = humps.decamelize(result["insertUpdateFile"]["file"])
+
+            return {
+                "file_uuid": file_obj["file_uuid"],
+                "request_uuid": file_obj["request_uuid"],
+                "file_name": file_obj["file_name"],
+                "file_url": file_obj.get("file_url", ""),
+            }
+        except Exception as e:
+            self.logger.error(f"Failed to upload RFQ file: {e}")
+            raise
+
+    # * MCP Function.
+    def get_rfq_files(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Get RFQ files.
+        Maps to GraphQL: fileList query
+        """
+        try:
+            variables = {
+                "pageNumber": arguments.get("page_number", 1),
+                "limit": arguments.get("limit", 50),
+                "requestUuid": arguments.get("request_uuid"),
+                "fileType": arguments.get("file_type"),
+            }
+
+            variables = {k: v for k, v in variables.items() if v is not None}
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "fileList",
+                "Query",
+                variables,
+            )
+
+            return humps.decamelize(result["fileList"])
+        except Exception as e:
+            self.logger.error(f"Failed to get RFQ files: {e}")
+            raise
+
+    # ==================== Segment Tools ====================
+
+    # * MCP Function.
+    def create_segment(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Create pricing segment.
+        Maps to GraphQL: insertUpdateSegment mutation
+        """
+        try:
+            self.logger.info(f"Creating segment: {arguments}")
+
+            variables = {
+                "segmentName": arguments["segment_name"],
+                "segmentDescription": arguments.get("segment_description", ""),
+                "updatedBy": "MCP",
+            }
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "insertUpdateSegment",
+                "Mutation",
+                variables,
+            )
+
+            segment = humps.decamelize(result["insertUpdateSegment"]["segment"])
+
+            return {
+                "segment_uuid": segment["segment_uuid"],
+                "segment_name": segment["segment_name"],
+                "segment_description": segment.get("segment_description", ""),
+            }
+        except Exception as e:
+            self.logger.error(f"Failed to create segment: {e}")
+            raise
+
+    # * MCP Function.
+    def add_contact_to_segment(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Add contact to segment.
+        Maps to GraphQL: insertUpdateSegmentContact mutation
+        """
+        try:
+            self.logger.info(f"Adding contact to segment: {arguments}")
+
+            variables = {
+                "segmentUuid": arguments["segment_uuid"],
+                "contactUuid": arguments["contact_uuid"],
+                "updatedBy": "MCP",
+            }
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "insertUpdateSegmentContact",
+                "Mutation",
+                variables,
+            )
+
+            segment_contact = humps.decamelize(
+                result["insertUpdateSegmentContact"]["segmentContact"]
+            )
+
+            return {
+                "segment_contact_uuid": segment_contact["segment_contact_uuid"],
+                "segment_uuid": segment_contact["segment_uuid"],
+                "contact_uuid": segment_contact["contact_uuid"],
+            }
+        except Exception as e:
+            self.logger.error(f"Failed to add contact to segment: {e}")
+            raise
+
+    # * MCP Function.
+    def get_segment_contacts(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        List segment contacts.
+        Maps to GraphQL: segmentContactList query
+        """
+        try:
+            variables = {
+                "pageNumber": arguments.get("page_number", 1),
+                "limit": arguments.get("limit", 50),
+                "segmentUuid": arguments.get("segment_uuid"),
+                "contactUuid": arguments.get("contact_uuid"),
+            }
+
+            variables = {k: v for k, v in variables.items() if v is not None}
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "segmentContactList",
+                "Query",
+                variables,
+            )
+
+            return humps.decamelize(result["segmentContactList"])
+        except Exception as e:
+            self.logger.error(f"Failed to get segment contacts: {e}")
+            raise

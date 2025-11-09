@@ -33,7 +33,6 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
-from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from dotenv import load_dotenv
@@ -60,8 +59,9 @@ sys.path.insert(0, os.path.join(base_dir, "silvaengine_utility"))
 sys.path.insert(1, os.path.join(base_dir, "mcp_rfq_processor"))
 sys.path.insert(2, os.path.join(base_dir, "ai_rfq_engine"))
 
-from mcp_rfq_processor.mcp_rfq_processor import MCPRfqProcessor
 from silvaengine_utility import Utility
+
+from mcp_rfq_processor.mcp_rfq_processor import MCPRfqProcessor
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -311,22 +311,7 @@ def mcp_rfq_processor():
         pytest.skip(f"MCPRfqProcessor not available: {ex}")
 
 
-@pytest.fixture(scope="module")
-def mcp_rfq_processor_mock():
-    """Provide a mocked MCPRfqProcessor instance for unit tests."""
-    mock_lambda = Mock()
-    mock_lambda.invoke.return_value = {"StatusCode": 200, "Payload": MagicMock()}
 
-    try:
-        processor = MCPRfqProcessor(logger, **SETTING)
-        processor._aws_lambda = mock_lambda
-        processor.endpoint_id = "test-endpoint"
-        setattr(processor, "__is_real__", False)
-        logger.info("Mocked MCPRfqProcessor initialized successfully")
-        return processor
-    except Exception as ex:
-        logger.warning(f"Mocked MCPRfqProcessor initialization failed: {ex}")
-        pytest.skip(f"Mocked MCPRfqProcessor not available: {ex}")
 
 
 # ============================================================================
@@ -337,84 +322,56 @@ def mcp_rfq_processor_mock():
 @pytest.mark.integration
 @pytest.mark.parametrize("test_data", REQUEST_TEST_DATA)
 @log_test_result
-def test_submit_rfq_request(mcp_rfq_processor_mock, test_data):
+def test_submit_rfq_request(mcp_rfq_processor, test_data):
     """Test submitting RFQ request."""
-    with patch.object(mcp_rfq_processor_mock, "_execute_graphql_query") as mock_query:
-        mock_query.return_value = {
-            "insertUpdateRequest": {
-                "request": {
-                    "requestUuid": test_data.get("requestUuid", "test-uuid"),
-                    "contactUuid": test_data.get("contactUuid"),
-                    "requestTitle": test_data.get("requestTitle"),
-                    "status": test_data.get("status", "pending"),
-                    "createdAt": "2025-11-08T00:00:00Z",
-                    "updatedAt": "2025-11-08T00:00:00Z",
-                }
-            }
-        }
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "submit_rfq_request",
+        {
+            "contact_uuid": test_data.get("email"),
+            "request_title": test_data.get("requestTitle"),
+            "request_description": test_data.get("requestDescription", ""),
+        },
+        "submit_rfq_request",
+    )
 
-        result, error = _call_method(
-            mcp_rfq_processor_mock,
-            "submit_rfq_request",
-            {
-                "contact_uuid": test_data.get("contactUuid"),
-                "request_title": test_data.get("requestTitle"),
-                "request_description": test_data.get("requestDescription", ""),
-            },
-            "submit_rfq_request",
-        )
-
-        assert error is None
-        assert result is not None
-        assert "request_uuid" in result
+    assert error is None
+    assert result is not None
+    assert "request_uuid" in result
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("test_data", REQUEST_GET_TEST_DATA)
 @log_test_result
-def test_get_rfq_request(mcp_rfq_processor_mock, test_data):
+def test_get_rfq_request(mcp_rfq_processor, test_data):
     """Test retrieving RFQ request."""
-    with patch.object(mcp_rfq_processor_mock, "_execute_graphql_query") as mock_query:
-        mock_query.return_value = {
-            "request": {
-                "requestUuid": test_data.get("requestUuid"),
-                "requestTitle": "Test Request",
-                "status": "pending",
-            }
-        }
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "get_rfq_request",
+        {"request_uuid": test_data.get("requestUuid")},
+        "get_rfq_request",
+    )
 
-        result, error = _call_method(
-            mcp_rfq_processor_mock,
-            "get_rfq_request",
-            {"request_uuid": test_data.get("requestUuid")},
-            "get_rfq_request",
-        )
-
-        assert error is None
-        assert result is not None
-        assert result["request_uuid"] == test_data.get("requestUuid")
+    assert error is None
+    assert result is not None
+    assert result["request_uuid"] == test_data.get("requestUuid")
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("test_data", REQUEST_LIST_TEST_DATA)
 @log_test_result
-def test_search_rfq_requests(mcp_rfq_processor_mock, test_data):
+def test_search_rfq_requests(mcp_rfq_processor, test_data):
     """Test searching RFQ requests."""
-    with patch.object(mcp_rfq_processor_mock, "_execute_graphql_query") as mock_query:
-        mock_query.return_value = {
-            "requestList": {"totalCount": 1, "requests": [{"requestUuid": "req-123"}]}
-        }
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "search_rfq_requests",
+        {"limit": test_data.get("limit", 20)},
+        "search_rfq_requests",
+    )
 
-        result, error = _call_method(
-            mcp_rfq_processor_mock,
-            "search_rfq_requests",
-            {"limit": test_data.get("limit", 20)},
-            "search_rfq_requests",
-        )
-
-        assert error is None
-        assert result is not None
-        assert "total_count" in result
+    assert error is None
+    assert result is not None
+    assert "total_count" in result
 
 
 # ============================================================================
@@ -425,73 +382,52 @@ def test_search_rfq_requests(mcp_rfq_processor_mock, test_data):
 @pytest.mark.integration
 @pytest.mark.parametrize("test_data", ITEM_LIST_TEST_DATA)
 @log_test_result
-def test_search_items(mcp_rfq_processor_mock, test_data):
+def test_search_items(mcp_rfq_processor, test_data):
     """Test searching items."""
-    with patch.object(mcp_rfq_processor_mock, "_execute_graphql_query") as mock_query:
-        mock_query.return_value = {
-            "itemList": {"totalCount": 10, "items": [{"itemUuid": "item-123"}]}
-        }
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "search_items",
+        {"item_type": test_data.get("itemType")},
+        "search_items",
+    )
 
-        result, error = _call_method(
-            mcp_rfq_processor_mock,
-            "search_items",
-            {"item_type": test_data.get("itemType")},
-            "search_items",
-        )
-
-        assert error is None
-        assert result is not None
-        assert "total_count" in result
+    assert error is None
+    assert result is not None
+    assert "total_count" in result
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("test_data", ITEM_GET_TEST_DATA)
 @log_test_result
-def test_get_item(mcp_rfq_processor_mock, test_data):
+def test_get_item(mcp_rfq_processor, test_data):
     """Test getting item details."""
-    with patch.object(mcp_rfq_processor_mock, "_execute_graphql_query") as mock_query:
-        mock_query.return_value = {
-            "item": {
-                "itemUuid": test_data.get("itemUuid"),
-                "itemName": "Test Item",
-            }
-        }
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "get_item",
+        {"item_uuid": test_data.get("itemUuid")},
+        "get_item",
+    )
 
-        result, error = _call_method(
-            mcp_rfq_processor_mock,
-            "get_item",
-            {"item_uuid": test_data.get("itemUuid")},
-            "get_item",
-        )
-
-        assert error is None
-        assert result is not None
-        assert result["item_uuid"] == test_data.get("itemUuid")
+    assert error is None
+    assert result is not None
+    assert result["item_uuid"] == test_data.get("itemUuid")
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("test_data", PROVIDER_ITEM_LIST_TEST_DATA)
 @log_test_result
-def test_get_provider_items(mcp_rfq_processor_mock, test_data):
+def test_get_provider_items(mcp_rfq_processor, test_data):
     """Test getting provider items."""
-    with patch.object(mcp_rfq_processor_mock, "_execute_graphql_query") as mock_query:
-        mock_query.return_value = {
-            "providerItemList": {
-                "totalCount": 5,
-                "providerItems": [{"providerItemUuid": "pitem-123"}],
-            }
-        }
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "get_provider_items",
+        {"item_uuid": test_data.get("itemUuid")},
+        "get_provider_items",
+    )
 
-        result, error = _call_method(
-            mcp_rfq_processor_mock,
-            "get_provider_items",
-            {"item_uuid": test_data.get("itemUuid")},
-            "get_provider_items",
-        )
-
-        assert error is None
-        assert result is not None
-        assert "total_count" in result
+    assert error is None
+    assert result is not None
+    assert "total_count" in result
 
 
 # ============================================================================
@@ -502,86 +438,60 @@ def test_get_provider_items(mcp_rfq_processor_mock, test_data):
 @pytest.mark.integration
 @pytest.mark.parametrize("test_data", QUOTE_TEST_DATA)
 @log_test_result
-def test_create_quote(mcp_rfq_processor_mock, test_data):
+def test_create_quote(mcp_rfq_processor, test_data):
     """Test creating quote."""
-    with patch.object(mcp_rfq_processor_mock, "_execute_graphql_query") as mock_query:
-        mock_query.return_value = {
-            "insertUpdateQuote": {
-                "quote": {
-                    "quoteUuid": test_data.get("quoteUuid"),
-                    "requestUuid": test_data.get("requestUuid"),
-                    "totalQuoteAmount": test_data.get("totalQuoteAmount", 0.0),
-                    "status": "draft",
-                }
-            }
-        }
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "create_quote",
+        {
+            "request_uuid": test_data.get("requestUuid"),
+            "provider_corp_external_id": test_data.get("providerCorpExternalId"),
+            "shipping_method": test_data.get("shippingMethod"),
+            "shipping_amount": test_data.get("shippingAmount"),
+        },
+        "create_quote",
+    )
 
-        result, error = _call_method(
-            mcp_rfq_processor_mock,
-            "create_quote",
-            {
-                "request_uuid": test_data.get("requestUuid"),
-                "provider_corp_external_id": test_data.get("providerCorpExternalId"),
-            },
-            "create_quote",
-        )
-
-        assert error is None
-        assert result is not None
-        assert "quote_uuid" in result
+    assert error is None
+    assert result is not None
+    assert "quote_uuid" in result
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("test_data", QUOTE_GET_TEST_DATA)
 @log_test_result
-def test_get_quote(mcp_rfq_processor_mock, test_data):
+def test_get_quote(mcp_rfq_processor, test_data):
     """Test getting quote details."""
-    with patch.object(mcp_rfq_processor_mock, "_execute_graphql_query") as mock_query:
-        mock_query.return_value = {
-            "quote": {
-                "quoteUuid": test_data.get("quoteUuid"),
-                "totalQuoteAmount": 1000.0,
-            }
-        }
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "get_quote",
+        {"quote_uuid": test_data.get("quoteUuid")},
+        "get_quote",
+    )
 
-        result, error = _call_method(
-            mcp_rfq_processor_mock,
-            "get_quote",
-            {"quote_uuid": test_data.get("quoteUuid")},
-            "get_quote",
-        )
-
-        assert error is None
-        assert result is not None
-        assert result["quote_uuid"] == test_data.get("quoteUuid")
+    assert error is None
+    assert result is not None
+    assert result["quote_uuid"] == test_data.get("quoteUuid")
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("test_data", QUOTE_ITEM_TEST_DATA)
 @log_test_result
-def test_update_quote_item_discount(mcp_rfq_processor_mock, test_data):
+def test_update_quote_item_discount(mcp_rfq_processor, test_data):
     """Test updating quote item discount."""
-    with patch.object(mcp_rfq_processor_mock, "_execute_graphql_query") as mock_query:
-        mock_query.return_value = {
-            "insertUpdateQuoteItem": {
-                "quoteItem": {
-                    "quoteItemUuid": test_data.get("quoteItemUuid"),
-                    "discountAmount": 0.0,
-                    "totalAmount": test_data.get("totalAmount", 0.0),
-                }
-            }
-        }
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "update_quote_item_discount",
+        {
+            "quote_item_uuid": test_data.get("quoteItemUuid"),
+            "discount_amount": test_data.get("subtotalDiscount", 0.0),
+        },
+        "update_quote_item_discount",
+    )
 
-        result, error = _call_method(
-            mcp_rfq_processor_mock,
-            "update_quote_item_discount",
-            {"quote_item_uuid": test_data.get("quoteItemUuid")},
-            "update_quote_item_discount",
-        )
-
-        assert error is None
-        assert result is not None
-        assert "quote_item_uuid" in result
+    assert error is None
+    assert result is not None
+    assert "quote_item_uuid" in result
 
 
 # ============================================================================
@@ -592,48 +502,35 @@ def test_update_quote_item_discount(mcp_rfq_processor_mock, test_data):
 @pytest.mark.integration
 @pytest.mark.parametrize("test_data", ITEM_PRICE_TIER_LIST_TEST_DATA)
 @log_test_result
-def test_get_item_price_tiers(mcp_rfq_processor_mock, test_data):
+def test_get_item_price_tiers(mcp_rfq_processor, test_data):
     """Test getting item price tiers."""
-    with patch.object(mcp_rfq_processor_mock, "_execute_graphql_query") as mock_query:
-        mock_query.return_value = {
-            "itemPriceTierList": {
-                "totalCount": 3,
-                "itemPriceTiers": [{"pricePerUom": 9.0}],
-            }
-        }
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "get_item_price_tiers",
+        {"item_uuid": test_data.get("itemUuid")},
+        "get_item_price_tiers",
+    )
 
-        result, error = _call_method(
-            mcp_rfq_processor_mock,
-            "get_item_price_tiers",
-            {"item_uuid": test_data.get("itemUuid")},
-            "get_item_price_tiers",
-        )
-
-        assert error is None
-        assert result is not None
-        assert "total_count" in result
+    assert error is None
+    assert result is not None
+    assert "total_count" in result
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("test_data", DISCOUNT_RULE_LIST_TEST_DATA)
 @log_test_result
-def test_get_discount_rules(mcp_rfq_processor_mock, test_data):
+def test_get_discount_rules(mcp_rfq_processor, test_data):
     """Test getting discount rules."""
-    with patch.object(mcp_rfq_processor_mock, "_execute_graphql_query") as mock_query:
-        mock_query.return_value = {
-            "discountRuleList": {
-                "totalCount": 2,
-                "discountRules": [{"discountPercent": 10.0}],
-            }
-        }
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "get_discount_rules",
+        {"item_uuid": test_data.get("itemUuid")},
+        "get_discount_rules",
+    )
 
-        result, error = _call_method(
-            mcp_rfq_processor_mock, "get_discount_rules", {}, "get_discount_rules"
-        )
-
-        assert error is None
-        assert result is not None
-        assert "total_count" in result
+    assert error is None
+    assert result is not None
+    assert "total_count" in result
 
 
 # ============================================================================
@@ -643,7 +540,7 @@ def test_get_discount_rules(mcp_rfq_processor_mock, test_data):
 
 @pytest.mark.integration
 @log_test_result
-def test_complete_rfq_workflow(mcp_rfq_processor_mock):
+def test_complete_rfq_workflow(mcp_rfq_processor):
     """Test complete RFQ workflow from request to quote."""
     if not REQUEST_TEST_DATA or not QUOTE_TEST_DATA:
         pytest.skip("Insufficient test data for workflow test")
@@ -651,61 +548,41 @@ def test_complete_rfq_workflow(mcp_rfq_processor_mock):
     request_data = REQUEST_TEST_DATA[0]
     quote_data = QUOTE_TEST_DATA[0]
 
-    with patch.object(mcp_rfq_processor_mock, "_execute_graphql_query") as mock_query:
-        # Step 1: Submit request
-        mock_query.return_value = {
-            "insertUpdateRequest": {
-                "request": {
-                    "requestUuid": request_data.get("requestUuid"),
-                    "status": "pending",
-                    "createdAt": "2025-11-08T00:00:00Z",
-                    "updatedAt": "2025-11-08T00:00:00Z",
-                }
-            }
-        }
+    # Step 1: Submit request
+    request_result, request_error = _call_method(
+        mcp_rfq_processor,
+        "submit_rfq_request",
+        {
+            "contact_uuid": request_data.get("email"),
+            "request_title": request_data.get("requestTitle"),
+            "request_description": request_data.get("requestDescription", ""),
+        },
+        "workflow_submit_request",
+    )
 
-        request_result, request_error = _call_method(
-            mcp_rfq_processor_mock,
-            "submit_rfq_request",
-            {
-                "contact_uuid": request_data.get("contactUuid"),
-                "request_title": request_data.get("requestTitle"),
-            },
-            "workflow_submit_request",
-        )
+    assert request_error is None
+    assert "request_uuid" in request_result
+    logger.info(
+        f"Workflow Step 1: Request created - {request_result['request_uuid']}"
+    )
 
-        assert request_error is None
-        assert "request_uuid" in request_result
-        logger.info(
-            f"Workflow Step 1: Request created - {request_result['request_uuid']}"
-        )
+    # Step 2: Create quote
+    quote_result, quote_error = _call_method(
+        mcp_rfq_processor,
+        "create_quote",
+        {
+            "request_uuid": request_result["request_uuid"],
+            "provider_corp_external_id": quote_data.get("providerCorpExternalId"),
+            "shipping_method": quote_data.get("shippingMethod"),
+            "shipping_amount": quote_data.get("shippingAmount"),
+        },
+        "workflow_create_quote",
+    )
 
-        # Step 2: Create quote
-        mock_query.return_value = {
-            "insertUpdateQuote": {
-                "quote": {
-                    "quoteUuid": quote_data.get("quoteUuid"),
-                    "requestUuid": request_data.get("requestUuid"),
-                    "totalQuoteAmount": quote_data.get("totalQuoteAmount", 0.0),
-                    "status": "draft",
-                }
-            }
-        }
-
-        quote_result, quote_error = _call_method(
-            mcp_rfq_processor_mock,
-            "create_quote",
-            {
-                "request_uuid": request_data.get("requestUuid"),
-                "provider_corp_external_id": quote_data.get("providerCorpExternalId"),
-            },
-            "workflow_create_quote",
-        )
-
-        assert quote_error is None
-        assert "quote_uuid" in quote_result
-        logger.info(f"Workflow Step 2: Quote created - {quote_result['quote_uuid']}")
-        logger.info("Complete RFQ workflow executed successfully")
+    assert quote_error is None
+    assert "quote_uuid" in quote_result
+    logger.info(f"Workflow Step 2: Quote created - {quote_result['quote_uuid']}")
+    logger.info("Complete RFQ workflow executed successfully")
 
 
 if __name__ == "__main__":
