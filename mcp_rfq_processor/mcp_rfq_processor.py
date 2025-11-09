@@ -1039,11 +1039,7 @@ class MCPRfqProcessor:
 
             request = humps.decamelize(result["insertUpdateRequest"]["request"])
 
-            return {
-                "request_uuid": request["request_uuid"],
-                "status": request["status"],
-                "created_at": request["created_at"],
-            }
+            return request
         except Exception as e:
             self.logger.error(f"Failed to submit RFQ: {e}")
             raise
@@ -1091,11 +1087,7 @@ class MCPRfqProcessor:
 
             request = humps.decamelize(result["insertUpdateRequest"]["request"])
 
-            return {
-                "request_uuid": request["request_uuid"],
-                "status": request["status"],
-                "updated_at": request["updated_at"],
-            }
+            return request
         except Exception as e:
             self.logger.error(f"Failed to update RFQ: {e}")
             raise
@@ -1293,12 +1285,7 @@ class MCPRfqProcessor:
 
             quote = humps.decamelize(result["insertUpdateQuote"]["quote"])
 
-            return {
-                "quote_uuid": quote["quote_uuid"],
-                "request_uuid": quote["request_uuid"],
-                "total_quote_amount": quote.get("total_quote_amount", 0.0),
-                "status": quote["status"],
-            }
+            return quote
         except Exception as e:
             self.logger.error(f"Failed to create quote: {e}")
             raise
@@ -1343,12 +1330,7 @@ class MCPRfqProcessor:
 
             quote = humps.decamelize(result["insertUpdateQuote"]["quote"])
 
-            return {
-                "quote_uuid": quote["quote_uuid"],
-                "total_quote_amount": quote.get("total_quote_amount", 0.0),
-                "status": quote["status"],
-                "updated_at": quote["updated_at"],
-            }
+            return quote
         except Exception as e:
             self.logger.error(f"Failed to update quote: {e}")
             raise
@@ -1391,11 +1373,7 @@ class MCPRfqProcessor:
 
             quote_item = humps.decamelize(result["insertUpdateQuoteItem"]["quoteItem"])
 
-            return {
-                "quote_item_uuid": quote_item["quote_item_uuid"],
-                "subtotal_discount": quote_item.get("subtotal_discount", 0.0),
-                "total_amount": quote_item.get("total_amount", 0.0),
-            }
+            return quote_item
         except Exception as e:
             self.logger.error(f"Failed to update quote item discount: {e}")
             raise
@@ -1600,14 +1578,7 @@ class MCPRfqProcessor:
                 result["insertUpdateInstallment"]["installment"]
             )
 
-            return {
-                "installment_uuid": installment["installment_uuid"],
-                "quote_uuid": installment["quote_uuid"],
-                "priority": installment.get("priority"),
-                "scheduled_date": installment.get("scheduled_date"),
-                "installment_amount": installment.get("installment_amount"),
-                "status": installment["status"],
-            }
+            return installment
         except Exception as e:
             self.logger.error(f"Failed to create installment: {e}")
             raise
@@ -1667,12 +1638,7 @@ class MCPRfqProcessor:
 
             file_obj = humps.decamelize(result["insertUpdateFile"]["file"])
 
-            return {
-                "file_uuid": file_obj.get("file_uuid"),
-                "request_uuid": file_obj["request_uuid"],
-                "file_name": file_obj["file_name"],
-                "file_url": file_obj.get("file_url", ""),
-            }
+            return file_obj
         except Exception as e:
             self.logger.error(f"Failed to upload RFQ file: {e}")
             raise
@@ -1736,11 +1702,7 @@ class MCPRfqProcessor:
 
             segment = humps.decamelize(result["insertUpdateSegment"]["segment"])
 
-            return {
-                "segment_uuid": segment["segment_uuid"],
-                "segment_name": segment["segment_name"],
-                "segment_description": segment.get("segment_description", ""),
-            }
+            return segment
         except Exception as e:
             self.logger.error(f"Failed to create segment: {e}")
             raise
@@ -1776,11 +1738,7 @@ class MCPRfqProcessor:
                 result["insertUpdateSegmentContact"]["segmentContact"]
             )
 
-            return {
-                "segment_contact_uuid": segment_contact.get("segment_contact_uuid"),
-                "segment_uuid": segment_contact["segment_uuid"],
-                "email": segment_contact.get("email"),
-            }
+            return segment_contact
         except Exception as e:
             self.logger.error(f"Failed to add contact to segment: {e}")
             raise
