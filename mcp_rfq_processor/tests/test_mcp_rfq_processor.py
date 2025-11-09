@@ -59,9 +59,8 @@ sys.path.insert(0, os.path.join(base_dir, "silvaengine_utility"))
 sys.path.insert(1, os.path.join(base_dir, "mcp_rfq_processor"))
 sys.path.insert(2, os.path.join(base_dir, "ai_rfq_engine"))
 
-from silvaengine_utility import Utility
-
 from mcp_rfq_processor.mcp_rfq_processor import MCPRfqProcessor
+from silvaengine_utility import Utility
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -311,9 +310,6 @@ def mcp_rfq_processor():
         pytest.skip(f"MCPRfqProcessor not available: {ex}")
 
 
-
-
-
 # ============================================================================
 # REQUEST MANAGEMENT TESTS
 # ============================================================================
@@ -534,6 +530,262 @@ def test_get_discount_rules(mcp_rfq_processor, test_data):
 
 
 # ============================================================================
+# UPDATE REQUEST TESTS
+# ============================================================================
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", REQUEST_TEST_DATA)
+@log_test_result
+def test_update_rfq_request(mcp_rfq_processor, test_data):
+    """Test updating RFQ request."""
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "update_rfq_request",
+        {
+            "request_uuid": test_data.get("requestUuid"),
+            "request_title": "Updated " + test_data.get("requestTitle", ""),
+            "items": test_data.get("items", []),
+        },
+        "update_rfq_request",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "request_uuid" in result
+
+
+# ============================================================================
+# PROVIDER ITEM BATCH TESTS
+# ============================================================================
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", PROVIDER_ITEM_BATCH_LIST_TEST_DATA)
+@log_test_result
+def test_get_provider_item_batches(mcp_rfq_processor, test_data):
+    """Test getting provider item batches."""
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "get_provider_item_batches",
+        {"provider_item_uuid": test_data.get("providerItemUuid")},
+        "get_provider_item_batches",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "total_count" in result
+
+
+# ============================================================================
+# QUOTE UPDATE AND SEARCH TESTS
+# ============================================================================
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", QUOTE_TEST_DATA)
+@log_test_result
+def test_update_quote(mcp_rfq_processor, test_data):
+    """Test updating quote."""
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "update_quote",
+        {
+            "request_uuid": test_data.get("requestUuid"),
+            "quote_uuid": test_data.get("quoteUuid"),
+            "status": "submitted",
+        },
+        "update_quote",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "quote_uuid" in result
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", QUOTE_LIST_TEST_DATA)
+@log_test_result
+def test_search_quotes(mcp_rfq_processor, test_data):
+    """Test searching quotes."""
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "search_quotes",
+        {"limit": test_data.get("limit", 20)},
+        "search_quotes",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "total_count" in result
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", QUOTE_GET_TEST_DATA)
+@log_test_result
+def test_calculate_quote_pricing(mcp_rfq_processor, test_data):
+    """Test calculating quote pricing."""
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "calculate_quote_pricing",
+        {"quote_uuid": test_data.get("quoteUuid")},
+        "calculate_quote_pricing",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "quote_uuid" in result
+
+
+# ============================================================================
+# INSTALLMENT TESTS
+# ============================================================================
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", INSTALLMENT_TEST_DATA)
+@log_test_result
+def test_create_installment(mcp_rfq_processor, test_data):
+    """Test creating installment."""
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "create_installment",
+        {
+            "quote_uuid": test_data.get("quoteUuid"),
+            "installment_number": test_data.get("priority", 1),
+            "due_date": test_data.get("scheduledDate"),
+            "amount": test_data.get("installmentAmount"),
+        },
+        "create_installment",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "installment_uuid" in result
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", INSTALLMENT_LIST_TEST_DATA)
+@log_test_result
+def test_get_installments(mcp_rfq_processor, test_data):
+    """Test getting installments."""
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "get_installments",
+        {"quote_uuid": test_data.get("quoteUuid")},
+        "get_installments",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "total_count" in result
+
+
+# ============================================================================
+# FILE TESTS
+# ============================================================================
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", FILE_TEST_DATA)
+@log_test_result
+def test_upload_rfq_file(mcp_rfq_processor, test_data):
+    """Test uploading RFQ file."""
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "upload_rfq_file",
+        {
+            "request_uuid": test_data.get("requestUuid"),
+            "file_name": test_data.get("fileName"),
+        },
+        "upload_rfq_file",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "file_name" in result
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", FILE_TEST_DATA)
+@log_test_result
+def test_get_rfq_files(mcp_rfq_processor, test_data):
+    """Test getting RFQ files."""
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "get_rfq_files",
+        {"request_uuid": test_data.get("requestUuid")},
+        "get_rfq_files",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "total_count" in result
+
+
+# ============================================================================
+# SEGMENT TESTS
+# ============================================================================
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", SEGMENT_TEST_DATA)
+@log_test_result
+def test_create_segment(mcp_rfq_processor, test_data):
+    """Test creating segment."""
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "create_segment",
+        {
+            "segment_name": test_data.get("segmentName"),
+            "segment_description": test_data.get("segmentDescription", ""),
+        },
+        "create_segment",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "segment_uuid" in result
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", SEGMENT_TEST_DATA)
+@log_test_result
+def test_add_contact_to_segment(mcp_rfq_processor, test_data):
+    """Test adding contact to segment."""
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "add_contact_to_segment",
+        {
+            "segment_uuid": test_data.get("segmentUuid"),
+            "contact_uuid": test_data.get("email", "test@example.com"),
+        },
+        "add_contact_to_segment",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "segment_uuid" in result
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", SEGMENT_LIST_TEST_DATA)
+@log_test_result
+def test_get_segment_contacts(mcp_rfq_processor, test_data):
+    """Test getting segment contacts."""
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "get_segment_contacts",
+        {"segment_uuid": test_data.get("segmentUuid")},
+        "get_segment_contacts",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "total_count" in result
+
+
+# ============================================================================
 # WORKFLOW TESTS
 # ============================================================================
 
@@ -562,9 +814,7 @@ def test_complete_rfq_workflow(mcp_rfq_processor):
 
     assert request_error is None
     assert "request_uuid" in request_result
-    logger.info(
-        f"Workflow Step 1: Request created - {request_result['request_uuid']}"
-    )
+    logger.info(f"Workflow Step 1: Request created - {request_result['request_uuid']}")
 
     # Step 2: Create quote
     quote_result, quote_error = _call_method(

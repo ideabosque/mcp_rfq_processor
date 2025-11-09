@@ -10,7 +10,6 @@ from typing import Any, Dict
 
 import boto3
 import humps
-
 from silvaengine_utility import Utility
 
 # MCP Configuration
@@ -19,13 +18,13 @@ MCP_CONFIGURATION = {
         # Request Management Tools (4)
         {
             "name": "submit_rfq_request",
-            "description": "Submit a new RFQ request with contact information, title, and optional description. Returns the created request UUID and status.",
+            "description": "Submit a new RFQ request with contact information, title, items, and optional description. Returns the created request UUID and status.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "contact_uuid": {
                         "type": "string",
-                        "description": "UUID of the contact submitting the request",
+                        "description": "Email address of the contact submitting the request",
                     },
                     "request_title": {
                         "type": "string",
@@ -34,6 +33,35 @@ MCP_CONFIGURATION = {
                     "request_description": {
                         "type": "string",
                         "description": "Detailed description of the request",
+                    },
+                    "billing_address": {
+                        "type": "object",
+                        "description": "Billing address (JSON object)",
+                    },
+                    "shipping_address": {
+                        "type": "object",
+                        "description": "Shipping address (JSON object)",
+                    },
+                    "items": {
+                        "type": "array",
+                        "description": "List of items in the request (array of JSON objects)",
+                        "items": {"type": "object"},
+                    },
+                    "total_amount": {
+                        "type": "number",
+                        "description": "Total amount for the request",
+                    },
+                    "total_discount": {
+                        "type": "number",
+                        "description": "Total discount applied",
+                    },
+                    "final_total_amount": {
+                        "type": "number",
+                        "description": "Final total amount after discounts",
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Additional notes",
                     },
                     "expired_at": {
                         "type": "string",
@@ -60,7 +88,7 @@ MCP_CONFIGURATION = {
                     },
                     "contact_uuid": {
                         "type": "string",
-                        "description": "Updated contact UUID",
+                        "description": "Updated contact email address",
                     },
                     "request_title": {
                         "type": "string",
@@ -69,6 +97,35 @@ MCP_CONFIGURATION = {
                     "request_description": {
                         "type": "string",
                         "description": "Updated request description",
+                    },
+                    "billing_address": {
+                        "type": "object",
+                        "description": "Updated billing address (JSON object)",
+                    },
+                    "shipping_address": {
+                        "type": "object",
+                        "description": "Updated shipping address (JSON object)",
+                    },
+                    "items": {
+                        "type": "array",
+                        "description": "Updated list of items (array of JSON objects)",
+                        "items": {"type": "object"},
+                    },
+                    "total_amount": {
+                        "type": "number",
+                        "description": "Updated total amount",
+                    },
+                    "total_discount": {
+                        "type": "number",
+                        "description": "Updated total discount",
+                    },
+                    "final_total_amount": {
+                        "type": "number",
+                        "description": "Updated final total amount",
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Updated notes",
                     },
                     "expired_at": {
                         "type": "string",
@@ -955,13 +1012,23 @@ class MCPRfqProcessor:
             self.logger.info(f"Submitting RFQ request: {arguments}")
 
             variables = {
-                "contactUuid": arguments["contact_uuid"],
+                "email": arguments["contact_uuid"],
                 "requestTitle": arguments["request_title"],
                 "requestDescription": arguments.get("request_description", ""),
+                "billingAddress": arguments.get("billing_address"),
+                "shippingAddress": arguments.get("shipping_address"),
+                "items": arguments.get("items"),
+                "totalAmount": arguments.get("total_amount"),
+                "totalDiscount": arguments.get("total_discount"),
+                "finalTotalAmount": arguments.get("final_total_amount"),
+                "notes": arguments.get("notes"),
                 "expiredAt": arguments.get("expired_at"),
                 "status": arguments.get("status", "pending"),
                 "updatedBy": "MCP",
             }
+
+            # Remove None values
+            variables = {k: v for k, v in variables.items() if v is not None}
 
             result = self._execute_graphql_query(
                 "ai_rfq_graphql",
@@ -997,9 +1064,16 @@ class MCPRfqProcessor:
 
             variables = {
                 "requestUuid": arguments["request_uuid"],
-                "contactUuid": arguments.get("contact_uuid"),
+                "email": arguments.get("contact_uuid"),
                 "requestTitle": arguments.get("request_title"),
                 "requestDescription": arguments.get("request_description"),
+                "billingAddress": arguments.get("billing_address"),
+                "shippingAddress": arguments.get("shipping_address"),
+                "items": arguments.get("items"),
+                "totalAmount": arguments.get("total_amount"),
+                "totalDiscount": arguments.get("total_discount"),
+                "finalTotalAmount": arguments.get("final_total_amount"),
+                "notes": arguments.get("notes"),
                 "expiredAt": arguments.get("expired_at"),
                 "status": arguments.get("status"),
                 "updatedBy": "MCP",
@@ -1201,12 +1275,12 @@ class MCPRfqProcessor:
             variables = {
                 "requestUuid": arguments["request_uuid"],
                 "providerCorpExternalId": arguments["provider_corp_external_id"],
+                "salesRepEmail": arguments.get("sales_rep_email"),
                 "shippingMethod": arguments.get("shipping_method", "standard"),
                 "shippingAmount": arguments.get("shipping_amount", 0.0),
-                "taxAmount": arguments.get("tax_amount", 0.0),
+                "negotiationRounds": arguments.get("negotiation_rounds", 0.0),
                 "status": arguments.get("status", "draft"),
                 "notes": arguments.get("notes", ""),
-                "items": arguments.get("items", []),
                 "updatedBy": "MCP",
             }
 
@@ -1222,7 +1296,7 @@ class MCPRfqProcessor:
             return {
                 "quote_uuid": quote["quote_uuid"],
                 "request_uuid": quote["request_uuid"],
-                "total_quote_amount": quote["total_quote_amount"],
+                "total_quote_amount": quote.get("total_quote_amount", 0.0),
                 "status": quote["status"],
             }
         except Exception as e:
@@ -1232,12 +1306,12 @@ class MCPRfqProcessor:
     # * MCP Function.
     def update_quote(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Update quote metadata (shipping, tax, status, notes).
+        Update quote metadata (shipping, status, notes).
         Maps to GraphQL: insertUpdateQuote mutation
 
         Can update:
-        - shippingMethod, shippingAmount
-        - taxAmount
+        - shipping_method, shipping_amount
+        - negotiation_rounds
         - status
         - notes
 
@@ -1247,10 +1321,11 @@ class MCPRfqProcessor:
             self.logger.info(f"Updating quote: {arguments}")
 
             variables = {
+                "requestUuid": arguments["request_uuid"],
                 "quoteUuid": arguments["quote_uuid"],
                 "shippingMethod": arguments.get("shipping_method"),
                 "shippingAmount": arguments.get("shipping_amount"),
-                "taxAmount": arguments.get("tax_amount"),
+                "negotiationRounds": arguments.get("negotiation_rounds"),
                 "status": arguments.get("status"),
                 "notes": arguments.get("notes"),
                 "updatedBy": "MCP",
@@ -1270,7 +1345,7 @@ class MCPRfqProcessor:
 
             return {
                 "quote_uuid": quote["quote_uuid"],
-                "total_quote_amount": quote["total_quote_amount"],
+                "total_quote_amount": quote.get("total_quote_amount", 0.0),
                 "status": quote["status"],
                 "updated_at": quote["updated_at"],
             }
@@ -1291,12 +1366,21 @@ class MCPRfqProcessor:
             self.logger.info(f"Updating quote item discount: {arguments}")
 
             variables = {
-                "quoteItemUuid": arguments["quote_item_uuid"],
-                "discountAmount": arguments.get("discount_amount", 0.0),
-                "discountPercent": arguments.get("discount_percent", 0.0),
-                "discountNotes": arguments.get("discount_notes", ""),
+                "quoteUuid": arguments["quote_uuid"],
+                "quoteItemUuid": arguments.get("quote_item_uuid"),
+                "providerItemUuid": arguments.get("provider_item_uuid"),
+                "itemUuid": arguments.get("item_uuid"),
+                "segmentUuid": arguments.get("segment_uuid"),
+                "batchNo": arguments.get("batch_no"),
+                "requestUuid": arguments.get("request_uuid"),
+                "requestData": arguments.get("request_data"),
+                "qty": arguments.get("qty"),
+                "subtotalDiscount": arguments.get("discount_amount", 0.0),
                 "updatedBy": "MCP",
             }
+
+            # Remove None values
+            variables = {k: v for k, v in variables.items() if v is not None}
 
             result = self._execute_graphql_query(
                 "ai_rfq_graphql",
@@ -1309,9 +1393,8 @@ class MCPRfqProcessor:
 
             return {
                 "quote_item_uuid": quote_item["quote_item_uuid"],
-                "discount_amount": quote_item["discount_amount"],
-                "discount_percent": quote_item["discount_percent"],
-                "total_amount": quote_item["total_amount"],
+                "subtotal_discount": quote_item.get("subtotal_discount", 0.0),
+                "total_amount": quote_item.get("total_amount", 0.0),
             }
         except Exception as e:
             self.logger.error(f"Failed to update quote item discount: {e}")
@@ -1496,9 +1579,12 @@ class MCPRfqProcessor:
 
             variables = {
                 "quoteUuid": arguments["quote_uuid"],
-                "installmentNumber": arguments["installment_number"],
-                "dueDate": arguments["due_date"],
-                "amount": arguments["amount"],
+                "requestUuid": arguments.get("request_uuid"),
+                "priority": arguments.get("installment_number"),
+                "salesorderNo": arguments.get("salesorder_no"),
+                "scheduledDate": arguments.get("due_date"),
+                "installmentRatio": arguments.get("installment_ratio"),
+                "installmentAmount": arguments.get("amount"),
                 "status": arguments.get("status", "pending"),
                 "updatedBy": "MCP",
             }
@@ -1517,9 +1603,9 @@ class MCPRfqProcessor:
             return {
                 "installment_uuid": installment["installment_uuid"],
                 "quote_uuid": installment["quote_uuid"],
-                "installment_number": installment["installment_number"],
-                "due_date": installment["due_date"],
-                "amount": installment["amount"],
+                "priority": installment.get("priority"),
+                "scheduled_date": installment.get("scheduled_date"),
+                "installment_amount": installment.get("installment_amount"),
                 "status": installment["status"],
             }
         except Exception as e:
@@ -1568,8 +1654,7 @@ class MCPRfqProcessor:
             variables = {
                 "requestUuid": arguments["request_uuid"],
                 "fileName": arguments["file_name"],
-                "fileType": arguments["file_type"],
-                "fileData": arguments["file_data"],
+                "email": arguments.get("email"),
                 "updatedBy": "MCP",
             }
 
@@ -1583,7 +1668,7 @@ class MCPRfqProcessor:
             file_obj = humps.decamelize(result["insertUpdateFile"]["file"])
 
             return {
-                "file_uuid": file_obj["file_uuid"],
+                "file_uuid": file_obj.get("file_uuid"),
                 "request_uuid": file_obj["request_uuid"],
                 "file_name": file_obj["file_name"],
                 "file_url": file_obj.get("file_url", ""),
@@ -1632,10 +1717,15 @@ class MCPRfqProcessor:
             self.logger.info(f"Creating segment: {arguments}")
 
             variables = {
+                "segmentUuid": arguments.get("segment_uuid"),
+                "providerCorpExternalId": arguments.get("provider_corp_external_id"),
                 "segmentName": arguments["segment_name"],
                 "segmentDescription": arguments.get("segment_description", ""),
                 "updatedBy": "MCP",
             }
+
+            # Remove None values
+            variables = {k: v for k, v in variables.items() if v is not None}
 
             result = self._execute_graphql_query(
                 "ai_rfq_graphql",
@@ -1666,9 +1756,14 @@ class MCPRfqProcessor:
 
             variables = {
                 "segmentUuid": arguments["segment_uuid"],
-                "contactUuid": arguments["contact_uuid"],
+                "email": arguments["contact_uuid"],
+                "contactUuid": arguments.get("contact_uuid_field"),
+                "consumerCorpExternalId": arguments.get("consumer_corp_external_id"),
                 "updatedBy": "MCP",
             }
+
+            # Remove None values
+            variables = {k: v for k, v in variables.items() if v is not None}
 
             result = self._execute_graphql_query(
                 "ai_rfq_graphql",
@@ -1682,9 +1777,9 @@ class MCPRfqProcessor:
             )
 
             return {
-                "segment_contact_uuid": segment_contact["segment_contact_uuid"],
+                "segment_contact_uuid": segment_contact.get("segment_contact_uuid"),
                 "segment_uuid": segment_contact["segment_uuid"],
-                "contact_uuid": segment_contact["contact_uuid"],
+                "email": segment_contact.get("email"),
             }
         except Exception as e:
             self.logger.error(f"Failed to add contact to segment: {e}")
