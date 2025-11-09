@@ -59,8 +59,6 @@ sys.path.insert(0, os.path.join(base_dir, "silvaengine_utility"))
 sys.path.insert(1, os.path.join(base_dir, "mcp_rfq_processor"))
 sys.path.insert(2, os.path.join(base_dir, "ai_rfq_engine"))
 
-from silvaengine_utility import Utility
-
 from mcp_rfq_processor.mcp_rfq_processor import MCPRfqProcessor
 
 # ============================================================================
