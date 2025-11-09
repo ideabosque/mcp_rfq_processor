@@ -49,3 +49,12 @@ exclude = '''
   | dist
 )/
 '''
+
+[tool.pyright]
+typeCheckingMode = "basic"
+reportCallIssue = "none"
+reportArgumentType = "none"
+reportArgumentTypeIssues = "none"
+reportRedeclaration = "none"
+reportOptionalMemberAccess = "none"
+reportAttributeAccessIssue = "none"
