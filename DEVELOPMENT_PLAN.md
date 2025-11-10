@@ -39,14 +39,17 @@ quote (in_progress)
     • update quote items (apply discount, adjust quantity)
     • remove quote items
     ↓
-quote (completed) or quote (disapproved)
+quote (confirmed)
+    ↓
+quote (completed) with payment (create installment) or quote (disapproved)
 ```
 
 **Quote Status Definitions:**
 - **initial**: Quote has been created but not yet being worked on
 - **in_progress**: Quote is being edited, items can be added/updated/removed
-- **completed**: Quote has been finalized and approved
-- **disapproved**: Quote was rejected or invalidated
+- **confirmed**: Quote has been finalized and is awaiting approval/payment
+- **completed**: Quote has been approved and payment installments have been created
+- **disapproved**: Quote was rejected or invalidated (e.g., when parent request is modified)
 
 ### Critical Business Rules
 
