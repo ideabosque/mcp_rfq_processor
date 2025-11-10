@@ -66,7 +66,7 @@ MCP_CONFIGURATION = {
         },
         {
             "name": "update_rfq_request",
-            "description": "Update existing RFQ request. Use when modifying request details or items (note: changing items requires creating a new quote). Returns updated request information.",
+            "description": "Update existing RFQ request including title, description, addresses, notes, status, and items. For individual item modifications, you can also use add_item_to_rfq_request or remove_item_from_rfq_request. Returns updated request information.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -168,6 +168,46 @@ MCP_CONFIGURATION = {
                         "description": "Filter by expiration end date",
                     },
                 },
+            },
+        },
+        {
+            "name": "add_item_to_rfq_request",
+            "description": "Add a single item to an existing RFQ request. Automatically fetches the current request, adds the new item, and updates the request. Returns the updated request with status set to 'modified'.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request_uuid": {
+                        "type": "string",
+                        "description": "UUID of the request to update",
+                    },
+                    "item": {
+                        "type": "object",
+                        "description": "Item object to add (JSON object with item details such as item_uuid, quantity, etc.)",
+                    },
+                },
+                "required": ["request_uuid", "item"],
+            },
+        },
+        {
+            "name": "remove_item_from_rfq_request",
+            "description": "Remove a single item from an existing RFQ request. Can remove by item UUID or item name. Returns the updated request with status set to 'modified'.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request_uuid": {
+                        "type": "string",
+                        "description": "UUID of the request to update",
+                    },
+                    "item_uuid": {
+                        "type": "string",
+                        "description": "UUID of the item to remove (mutually exclusive with item_name)",
+                    },
+                    "item_name": {
+                        "type": "string",
+                        "description": "Name of the item to remove (mutually exclusive with item_uuid)",
+                    },
+                },
+                "required": ["request_uuid"],
             },
         },
         # Item Management Tools (4)
@@ -770,6 +810,22 @@ MCP_CONFIGURATION = {
             "function_name": "search_rfq_requests",
             "return_type": "text",
         },
+        {
+            "type": "tool",
+            "name": "add_item_to_rfq_request",
+            "module_name": "mcp_rfq_processor",
+            "class_name": "MCPRfqProcessor",
+            "function_name": "add_item_to_rfq_request",
+            "return_type": "text",
+        },
+        {
+            "type": "tool",
+            "name": "remove_item_from_rfq_request",
+            "module_name": "mcp_rfq_processor",
+            "class_name": "MCPRfqProcessor",
+            "function_name": "remove_item_from_rfq_request",
+            "return_type": "text",
+        },
         # Item Management Tools
         {
             "type": "tool",
@@ -1066,13 +1122,16 @@ class MCPRfqProcessor:
     # * MCP Function.
     def update_rfq_request(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Update existing RFQ request.
+        Update existing RFQ request metadata.
         Maps to GraphQL: insertUpdateRequest mutation
 
         Use this when:
-        - Modifying request details
-        - Changing requested items (requires creating new quote)
-        - Updating deadline or description
+        - Modifying request details (title, description, addresses, notes, etc.)
+        - Updating items list (note: changing items requires creating a new quote)
+        - Updating deadline or status
+
+        Note: You can also use add_item_to_rfq_request or remove_item_from_rfq_request
+        for individual item modifications.
         """
         try:
             self.logger.info(f"Updating RFQ request: {arguments}")
@@ -1156,6 +1215,140 @@ class MCPRfqProcessor:
             return humps.decamelize(result["requestList"])
         except Exception as e:
             self.logger.error(f"Failed to search requests: {e}")
+            raise
+
+    # * MCP Function.
+    def add_item_to_rfq_request(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Add an item to an existing RFQ request.
+        This is a convenience method that fetches the current request,
+        adds the new item to the items array, and updates the request.
+
+        Args:
+            request_uuid: UUID of the request to update
+            item: Item object to add (JSON object with item details)
+
+        Returns:
+            Updated request with the new item added
+        """
+        try:
+            self.logger.info(f"Adding item to RFQ request: {arguments}")
+
+            # Fetch current request
+            current_request = self.get_rfq_request(
+                request_uuid=arguments["request_uuid"]
+            )
+
+            # Get current items or initialize empty array
+            current_items = current_request.get("items", [])
+            if current_items is None:
+                current_items = []
+
+            # Add new item
+            new_item = arguments["item"]
+            current_items.append(new_item)
+
+            # Update request with new items array
+            variables = {
+                "requestUuid": arguments["request_uuid"],
+                "items": current_items,
+                "status": "modified",  # Mark as modified when items change
+                "updatedBy": "MCP",
+            }
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "insertUpdateRequest",
+                "Mutation",
+                variables,
+            )
+
+            request = humps.decamelize(result["insertUpdateRequest"]["request"])
+
+            self.logger.info(f"Successfully added item to request {arguments['request_uuid']}")
+            return request
+        except Exception as e:
+            self.logger.error(f"Failed to add item to RFQ request: {e}")
+            raise
+
+    # * MCP Function.
+    def remove_item_from_rfq_request(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Remove an item from an existing RFQ request.
+        This is a convenience method that fetches the current request,
+        removes the specified item from the items array, and updates the request.
+
+        Args:
+            request_uuid: UUID of the request to update
+            item_uuid: UUID of the item to remove
+            OR
+            item_name: Name of the item to remove
+
+        Returns:
+            Updated request with the item removed
+        """
+        try:
+            self.logger.info(f"Removing item from RFQ request: {arguments}")
+
+            # Fetch current request
+            current_request = self.get_rfq_request(
+                request_uuid=arguments["request_uuid"]
+            )
+
+            # Get current items
+            current_items = current_request.get("items", [])
+            if not current_items:
+                raise ValueError("No items found in the request")
+
+            # Remove item by UUID or name
+            original_length = len(current_items)
+
+            if "item_uuid" in arguments:
+                item_uuid = arguments["item_uuid"]
+                # Find and remove item by UUID (check both snake_case and camelCase)
+                current_items = [
+                    item for item in current_items
+                    if item.get("item_uuid") != item_uuid and item.get("itemUuid") != item_uuid
+                ]
+                if len(current_items) == original_length:
+                    raise ValueError(f"Item with UUID '{item_uuid}' not found in request")
+                self.logger.info(f"Removed item with UUID {item_uuid}")
+
+            elif "item_name" in arguments:
+                item_name = arguments["item_name"]
+                # Find and remove item by name (check both snake_case and camelCase)
+                current_items = [
+                    item for item in current_items
+                    if item.get("item_name") != item_name and item.get("itemName") != item_name
+                ]
+                if len(current_items) == original_length:
+                    raise ValueError(f"Item with name '{item_name}' not found in request")
+                self.logger.info(f"Removed item with name {item_name}")
+
+            else:
+                raise ValueError("Must provide either item_uuid or item_name to remove an item")
+
+            # Update request with modified items array
+            variables = {
+                "requestUuid": arguments["request_uuid"],
+                "items": current_items,
+                "status": "modified",  # Mark as modified when items change
+                "updatedBy": "MCP",
+            }
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "insertUpdateRequest",
+                "Mutation",
+                variables,
+            )
+
+            request = humps.decamelize(result["insertUpdateRequest"]["request"])
+
+            self.logger.info(f"Successfully removed item from request {arguments['request_uuid']}")
+            return request
+        except Exception as e:
+            self.logger.error(f"Failed to remove item from RFQ request: {e}")
             raise
 
     # ==================== Item Management Tools ====================
@@ -1275,7 +1468,8 @@ class MCPRfqProcessor:
         Maps to GraphQL: insertUpdateQuote mutation
 
         Note: After creation, quote items cannot be added/deleted.
-        To change items, update the request and create a new quote.
+        To change items, use add_item_to_rfq_request or remove_item_from_rfq_request
+        on the request and create a new quote.
         """
         try:
             self.logger.info(f"Creating quote: {arguments}")
@@ -1358,7 +1552,8 @@ class MCPRfqProcessor:
         Maps to GraphQL: insertUpdateQuoteItem mutation
 
         This is the ONLY allowed modification to quote items after creation.
-        To add/remove items, update the request and create a new quote.
+        To add/remove items, use add_item_to_rfq_request or remove_item_from_rfq_request
+        on the request and create a new quote.
         """
         try:
             self.logger.info(f"Updating quote item discount: {arguments}")

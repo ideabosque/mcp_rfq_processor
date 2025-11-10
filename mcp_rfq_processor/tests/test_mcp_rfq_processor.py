@@ -564,6 +564,144 @@ def test_update_rfq_request(mcp_rfq_processor, test_data):
     assert "request_uuid" in result
 
 
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", REQUEST_TEST_DATA)
+@log_test_result
+def test_add_item_to_rfq_request(mcp_rfq_processor, test_data):
+    """Test adding item to RFQ request."""
+    # Prepare a test item to add
+    test_item = {
+        "item_uuid": "test-item-uuid-001",
+        "item_name": "Test Item",
+        "quantity": 10,
+        "uom": "EA",
+    }
+
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "add_item_to_rfq_request",
+        {
+            "request_uuid": test_data.get("requestUuid"),
+            "item": test_item,
+        },
+        "add_item_to_rfq_request",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "request_uuid" in result
+    assert "items" in result
+    # Verify the item was added
+    items = result.get("items", [])
+    assert any(
+        item.get("item_uuid") == test_item["item_uuid"]
+        or item.get("itemUuid") == test_item["item_uuid"]
+        for item in items
+    ), "Added item not found in request"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", REQUEST_TEST_DATA)
+@log_test_result
+def test_remove_item_from_rfq_request_by_uuid(mcp_rfq_processor, test_data):
+    """Test removing item from RFQ request by UUID."""
+    # First, get the request to see current items
+    get_result, get_error = _call_method(
+        mcp_rfq_processor,
+        "get_rfq_request",
+        {"request_uuid": test_data.get("requestUuid")},
+        "get_rfq_request_before_remove",
+    )
+
+    assert get_error is None
+    assert get_result is not None
+
+    items = get_result.get("items", [])
+    if not items:
+        pytest.skip("No items in request to test removal")
+
+    # Get the first item's UUID
+    first_item = items[0]
+    item_uuid_to_remove = first_item.get("item_uuid") or first_item.get("itemUuid")
+
+    if not item_uuid_to_remove:
+        pytest.skip("Item does not have UUID for removal test")
+
+    # Remove the item by UUID
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "remove_item_from_rfq_request",
+        {
+            "request_uuid": test_data.get("requestUuid"),
+            "item_uuid": item_uuid_to_remove,
+        },
+        "remove_item_from_rfq_request_by_uuid",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "request_uuid" in result
+    assert "items" in result
+    # Verify the item was removed
+    remaining_items = result.get("items", [])
+    assert not any(
+        item.get("item_uuid") == item_uuid_to_remove
+        or item.get("itemUuid") == item_uuid_to_remove
+        for item in remaining_items
+    ), "Item was not removed from request"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", REQUEST_TEST_DATA)
+@log_test_result
+def test_remove_item_from_rfq_request_by_name(mcp_rfq_processor, test_data):
+    """Test removing item from RFQ request by name."""
+    # First, get the request to see current items
+    get_result, get_error = _call_method(
+        mcp_rfq_processor,
+        "get_rfq_request",
+        {"request_uuid": test_data.get("requestUuid")},
+        "get_rfq_request_before_remove",
+    )
+
+    assert get_error is None
+    assert get_result is not None
+
+    items = get_result.get("items", [])
+    if not items:
+        pytest.skip("No items in request to test removal")
+
+    # Get the first item's name
+    first_item = items[0]
+    item_name_to_remove = first_item.get("item_name") or first_item.get("itemName")
+
+    if not item_name_to_remove:
+        pytest.skip("Item does not have name for removal test")
+
+    # Remove the item by name
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "remove_item_from_rfq_request",
+        {
+            "request_uuid": test_data.get("requestUuid"),
+            "item_name": item_name_to_remove,
+        },
+        "remove_item_from_rfq_request_by_name",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "request_uuid" in result
+    assert "items" in result
+    # Verify the item was removed
+    remaining_items = result.get("items", [])
+    assert not any(
+        item.get("item_name") == item_name_to_remove
+        or item.get("itemName") == item_name_to_remove
+        for item in remaining_items
+    ), "Item was not removed from request"
+
+
 # ============================================================================
 # QUOTE MANAGEMENT TESTS
 # ============================================================================
