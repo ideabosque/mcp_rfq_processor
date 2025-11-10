@@ -13,8 +13,17 @@ The MCP RFQ Processor connects AI assistants to the `ai_rfq_engine` GraphQL back
 - **Document Management**: Upload and track RFQ-related files
 - **Segment Management**: Organize customers and providers into pricing segments
 
-**Current Version**: 0.1.0  
+**Current Version**: 0.1.1  
 **Total MCP Tools**: 27 (fully implemented and tested)
+
+### What's New in v0.1.1
+
+- **Slow Move Item Tracking**: Automatically identify slow-moving inventory with `slow_move_item` flag and guardrail pricing
+- **Auto-calculated Negotiation Rounds**: Backend now automatically tracks quote rounds per provider
+- **Simplified Request Model**: Totals now calculated at quote level for better accuracy
+- **Enhanced Quote Items**: Quote responses include embedded items array with full details
+
+See [CHANGELOG.md](CHANGELOG.md) for detailed migration guide and breaking changes.
 
 ## Architecture
 

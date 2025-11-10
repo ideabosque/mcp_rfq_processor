@@ -290,7 +290,7 @@ MCP_CONFIGURATION = {
         },
         {
             "name": "get_provider_item_batches",
-            "description": "Get batch/lot information for provider items. Useful for tracking inventory batches and lot numbers.",
+            "description": "Get batch/lot information for provider items including slow_move_item flag and guardrail pricing. Useful for tracking inventory batches, lot numbers, and identifying slow-moving inventory that may need special pricing.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -316,7 +316,7 @@ MCP_CONFIGURATION = {
         # Quote Management Tools (5)
         {
             "name": "create_quote",
-            "description": "Create new quote for RFQ request. Returns quote UUID and total amount.",
+            "description": "Create new quote for RFQ request. Returns quote UUID and total amount. Note: shipping_method and shipping_amount cannot be set during creation - use update_quote after creation to set these fields.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -331,18 +331,6 @@ MCP_CONFIGURATION = {
                     "sales_rep_email": {
                         "type": "string",
                         "description": "Email of the sales representative",
-                    },
-                    "shipping_method": {
-                        "type": "string",
-                        "description": "Shipping method (default: standard)",
-                    },
-                    "shipping_amount": {
-                        "type": "number",
-                        "description": "Shipping cost",
-                    },
-                    "negotiation_rounds": {
-                        "type": "number",
-                        "description": "Number of negotiation rounds",
                     },
                     "status": {
                         "type": "string",
@@ -362,7 +350,7 @@ MCP_CONFIGURATION = {
         },
         {
             "name": "update_quote",
-            "description": "Update quote metadata (shipping, negotiation rounds, status, notes). Returns updated quote information.",
+            "description": "Update quote metadata (shipping, status, notes). Returns updated quote information. Note: negotiation rounds are auto-calculated by the backend.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -382,10 +370,6 @@ MCP_CONFIGURATION = {
                         "type": "number",
                         "description": "Updated shipping cost",
                     },
-                    "negotiation_rounds": {
-                        "type": "number",
-                        "description": "Updated negotiation rounds",
-                    },
                     "status": {
                         "type": "string",
                         "description": "Updated status",
@@ -404,7 +388,7 @@ MCP_CONFIGURATION = {
         },
         {
             "name": "get_quote",
-            "description": "Retrieve detailed quote information by UUID. Returns complete quote data including items and installments.",
+            "description": "Retrieve detailed quote information by UUID. Returns complete quote data including embedded quote_items array with slow_move_item flags and guardrail pricing, and installments.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -456,7 +440,7 @@ MCP_CONFIGURATION = {
         },
         {
             "name": "update_quote_item",
-            "description": "Update quote item including quantity, discount, and other properties. Returns updated item totals.",
+            "description": "Update quote item including quantity, discount, and other properties. Returns updated item totals with slow_move_item flag (indicates slow-moving inventory) and guardrail_price_per_uom (minimum acceptable price for profitability).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -506,7 +490,7 @@ MCP_CONFIGURATION = {
         },
         {
             "name": "add_quote_item",
-            "description": "Add a new item to an existing quote. Returns the created quote item with calculated totals.",
+            "description": "Add a new item to an existing quote. Returns the created quote item with calculated totals, slow_move_item flag (indicates slow-moving inventory), and guardrail_price_per_uom (minimum acceptable price). If batch_no is provided, these values come from the batch; otherwise slow_move_item defaults to false.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1512,6 +1496,11 @@ class MCPRfqProcessor:
         """
         Get batch information for provider items.
         Maps to GraphQL: providerItemBatchList query
+
+        Response includes:
+        - slow_move_item: Boolean flag indicating slow-moving inventory
+        - guardrail_price_per_uom: Minimum acceptable price for profitability
+        - Batch details: expired_at, produced_at, cost breakdown
         """
         try:
             variables = {
@@ -1554,13 +1543,14 @@ class MCPRfqProcessor:
                 "requestUuid": arguments["request_uuid"],
                 "providerCorpExternalId": arguments["provider_corp_external_id"],
                 "salesRepEmail": arguments.get("sales_rep_email"),
-                "shippingMethod": arguments.get("shipping_method", "standard"),
-                "shippingAmount": arguments.get("shipping_amount", 0.0),
-                "negotiationRounds": arguments.get("negotiation_rounds", 0.0),
                 "status": arguments.get("status", "draft"),
                 "notes": arguments.get("notes", ""),
                 "updatedBy": "MCP",
             }
+
+            # Remove None values to only send provided fields
+            # Note: 'rounds' is auto-calculated by backend, not sent on creation
+            variables = {k: v for k, v in variables.items() if v is not None}
 
             result = self._execute_graphql_query(
                 "ai_rfq_graphql",
@@ -1584,10 +1574,10 @@ class MCPRfqProcessor:
 
         Can update:
         - shipping_method, shipping_amount
-        - negotiation_rounds
         - status
         - notes
 
+        Note: negotiation_rounds (rounds) are auto-calculated by the backend.
         Cannot modify quote items - use update_quote_item, add_quote_item, or remove_quote_item instead
         """
         try:
@@ -1598,13 +1588,13 @@ class MCPRfqProcessor:
                 "quoteUuid": arguments["quote_uuid"],
                 "shippingMethod": arguments.get("shipping_method"),
                 "shippingAmount": arguments.get("shipping_amount"),
-                "negotiationRounds": arguments.get("negotiation_rounds"),
                 "status": arguments.get("status"),
                 "notes": arguments.get("notes"),
                 "updatedBy": "MCP",
             }
 
             # Remove None values to only update provided fields
+            # Note: 'rounds' is auto-calculated by backend, not sent in updates
             variables = {k: v for k, v in variables.items() if v is not None}
 
             result = self._execute_graphql_query(
@@ -1629,6 +1619,10 @@ class MCPRfqProcessor:
 
         Can update quote item properties including discount.
         To add/remove items, use add_quote_item or remove_quote_item.
+
+        Response includes:
+        - slow_move_item: Boolean flag indicating if item is from slow-moving inventory
+        - guardrail_price_per_uom: Minimum acceptable price for profitability
         """
         try:
             self.logger.info(f"Updating quote item: {arguments}")
@@ -1676,12 +1670,14 @@ class MCPRfqProcessor:
             item_uuid: UUID of the item
             qty: Quantity
             segment_uuid: UUID of the segment (optional)
-            batch_no: Batch number (optional)
+            batch_no: Batch number (optional, enables slow_move_item tracking)
             request_data: Request data (optional)
             discount_amount: Discount amount (optional)
 
         Returns:
-            Created quote item
+            Created quote item with:
+            - slow_move_item: Boolean flag (true if batch has slow-moving inventory)
+            - guardrail_price_per_uom: Minimum acceptable price
         """
         try:
             self.logger.info(f"Adding quote item: {arguments}")
@@ -1758,6 +1754,10 @@ class MCPRfqProcessor:
         """
         Retrieve quote details.
         Maps to GraphQL: quote query
+
+        Response includes:
+        - quote_items: Array of quote items with slow_move_item flags and guardrail pricing
+        - rounds: Number of negotiation rounds (auto-calculated)
         """
         try:
             result = self._execute_graphql_query(
