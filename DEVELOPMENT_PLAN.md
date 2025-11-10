@@ -4,6 +4,76 @@
 
 This document outlines the complete development plan for integrating the `ai_rfq_engine` GraphQL backend with the `mcp_rfq_processor` MCP server, following the proven patterns from `mcp_marketing_collection`.
 
+## Status Flow & Business Rules
+
+### Request Status Flow
+
+```
+request (initial)
+    ↓
+request (in_progress)
+    • add items
+    • update items  
+    • remove items
+    ↓
+request (confirmed)
+    • create quote
+    ↓
+request (completed) or request (modified)
+```
+
+**Request Status Definitions:**
+- **initial**: Request has been created but not yet being worked on
+- **in_progress**: Request is being edited, items can be added/updated/removed
+- **confirmed**: Request is finalized and ready for quote creation
+- **completed**: Request has been fulfilled with an approved quote
+- **modified**: Request was changed after quote creation (triggers quote disapproval)
+
+### Quote Status Flow
+
+```
+quote (initial)
+    ↓
+quote (in_progress)
+    • add quote items
+    • update quote items (apply discount, adjust quantity)
+    • remove quote items
+    ↓
+quote (completed) or quote (disapproved)
+```
+
+**Quote Status Definitions:**
+- **initial**: Quote has been created but not yet being worked on
+- **in_progress**: Quote is being edited, items can be added/updated/removed
+- **completed**: Quote has been finalized and approved
+- **disapproved**: Quote was rejected or invalidated
+
+### Critical Business Rules
+
+1. **Request Modification Impact on Quotes**
+   - When a request status changes to `modified`, all related quotes (regardless of their current status) are automatically changed to `disapproved`
+   - This ensures quotes always reflect the current request state
+   - A request becomes `modified` when items are changed after a quote has been created
+   - When the modified request is confirmed again, a new quote must be submitted
+   - Old disapproved quotes remain in the system for audit trail purposes
+
+2. **Quote Item Management**
+   - Quote items can be freely added, updated, or removed while quote status is `initial` or `in_progress`
+   - Use `add_quote_item` to add new items to a quote
+   - Use `update_quote_item` to modify existing items (discount, quantity, etc.)
+   - Use `remove_quote_item` to remove items from a quote
+
+3. **Request Item Management**
+   - Request items can be freely added, updated, or removed while request status is `initial` or `in_progress`
+   - Use `update_rfq_request` with `items` array to bulk replace items
+   - Use `add_item_to_rfq_request` to add individual items
+   - Use `remove_item_from_rfq_request` to remove items by UUID or name
+
+4. **Audit Trail**
+   - All status changes are logged with timestamps
+   - Modified requests maintain history of previous quotes
+   - Disapproved quotes remain in the system for audit purposes
+
 ## Reference Architecture
 
 ### ai_rfq_engine (Backend)
