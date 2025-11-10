@@ -455,8 +455,8 @@ MCP_CONFIGURATION = {
             },
         },
         {
-            "name": "update_quote_item_discount",
-            "description": "Update quote item including discount. Returns updated item totals.",
+            "name": "update_quote_item",
+            "description": "Update quote item including quantity, discount, and other properties. Returns updated item totals.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -502,6 +502,66 @@ MCP_CONFIGURATION = {
                     },
                 },
                 "required": ["quote_uuid"],
+            },
+        },
+        {
+            "name": "add_quote_item",
+            "description": "Add a new item to an existing quote. Returns the created quote item with calculated totals.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "quote_uuid": {
+                        "type": "string",
+                        "description": "UUID of the quote",
+                    },
+                    "provider_item_uuid": {
+                        "type": "string",
+                        "description": "UUID of the provider item",
+                    },
+                    "item_uuid": {
+                        "type": "string",
+                        "description": "UUID of the item",
+                    },
+                    "qty": {
+                        "type": "integer",
+                        "description": "Quantity",
+                    },
+                    "segment_uuid": {
+                        "type": "string",
+                        "description": "UUID of the segment (optional)",
+                    },
+                    "batch_no": {
+                        "type": "string",
+                        "description": "Batch number (optional)",
+                    },
+                    "request_data": {
+                        "type": "object",
+                        "description": "Request data (JSON object, optional)",
+                    },
+                    "discount_amount": {
+                        "type": "number",
+                        "description": "Discount amount (optional)",
+                    },
+                },
+                "required": ["quote_uuid", "provider_item_uuid", "item_uuid", "qty"],
+            },
+        },
+        {
+            "name": "remove_quote_item",
+            "description": "Remove an item from an existing quote. Returns success confirmation.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "quote_uuid": {
+                        "type": "string",
+                        "description": "UUID of the quote",
+                    },
+                    "quote_item_uuid": {
+                        "type": "string",
+                        "description": "UUID of the quote item to remove",
+                    },
+                },
+                "required": ["quote_uuid", "quote_item_uuid"],
             },
         },
         # Pricing Tools (3)
@@ -894,10 +954,26 @@ MCP_CONFIGURATION = {
         },
         {
             "type": "tool",
-            "name": "update_quote_item_discount",
+            "name": "update_quote_item",
             "module_name": "mcp_rfq_processor",
             "class_name": "MCPRfqProcessor",
-            "function_name": "update_quote_item_discount",
+            "function_name": "update_quote_item",
+            "return_type": "text",
+        },
+        {
+            "type": "tool",
+            "name": "add_quote_item",
+            "module_name": "mcp_rfq_processor",
+            "class_name": "MCPRfqProcessor",
+            "function_name": "add_quote_item",
+            "return_type": "text",
+        },
+        {
+            "type": "tool",
+            "name": "remove_quote_item",
+            "module_name": "mcp_rfq_processor",
+            "class_name": "MCPRfqProcessor",
+            "function_name": "remove_quote_item",
             "return_type": "text",
         },
         # Pricing Tools
@@ -1512,7 +1588,7 @@ class MCPRfqProcessor:
         - status
         - notes
 
-        Cannot modify quote items - use update_quote_item_discount instead
+        Cannot modify quote items - use update_quote_item, add_quote_item, or remove_quote_item instead
         """
         try:
             self.logger.info(f"Updating quote: {arguments}")
@@ -1546,17 +1622,16 @@ class MCPRfqProcessor:
             raise
 
     # * MCP Function.
-    def update_quote_item_discount(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+    def update_quote_item(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Update discount for a specific quote item.
+        Update a specific quote item (quantity, discount, etc.).
         Maps to GraphQL: insertUpdateQuoteItem mutation
 
-        This is the ONLY allowed modification to quote items after creation.
-        To add/remove items, use add_item_to_rfq_request or remove_item_from_rfq_request
-        on the request and create a new quote.
+        Can update quote item properties including discount.
+        To add/remove items, use add_quote_item or remove_quote_item.
         """
         try:
-            self.logger.info(f"Updating quote item discount: {arguments}")
+            self.logger.info(f"Updating quote item: {arguments}")
 
             variables = {
                 "quoteUuid": arguments["quote_uuid"],
@@ -1586,7 +1661,96 @@ class MCPRfqProcessor:
 
             return quote_item
         except Exception as e:
-            self.logger.error(f"Failed to update quote item discount: {e}")
+            self.logger.error(f"Failed to update quote item: {e}")
+            raise
+
+    # * MCP Function.
+    def add_quote_item(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Add a quote item to an existing quote.
+        This is a convenience method that adds a new item using insertUpdateQuoteItem mutation.
+
+        Args:
+            quote_uuid: UUID of the quote
+            provider_item_uuid: UUID of the provider item
+            item_uuid: UUID of the item
+            qty: Quantity
+            segment_uuid: UUID of the segment (optional)
+            batch_no: Batch number (optional)
+            request_data: Request data (optional)
+            discount_amount: Discount amount (optional)
+
+        Returns:
+            Created quote item
+        """
+        try:
+            self.logger.info(f"Adding quote item: {arguments}")
+
+            variables = {
+                "quoteUuid": arguments["quote_uuid"],
+                "providerItemUuid": arguments["provider_item_uuid"],
+                "itemUuid": arguments["item_uuid"],
+                "qty": arguments["qty"],
+                "segmentUuid": arguments.get("segment_uuid"),
+                "batchNo": arguments.get("batch_no"),
+                "requestData": arguments.get("request_data"),
+                "subtotalDiscount": arguments.get("discount_amount", 0.0),
+                "updatedBy": "MCP",
+            }
+
+            # Remove None values
+            variables = {k: v for k, v in variables.items() if v is not None}
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "insertUpdateQuoteItem",
+                "Mutation",
+                variables,
+            )
+
+            quote_item = humps.decamelize(result["insertUpdateQuoteItem"]["quoteItem"])
+
+            self.logger.info(f"Successfully added quote item to quote {arguments['quote_uuid']}")
+            return quote_item
+        except Exception as e:
+            self.logger.error(f"Failed to add quote item: {e}")
+            raise
+
+    # * MCP Function.
+    def remove_quote_item(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Remove a quote item from an existing quote.
+        Maps to GraphQL: deleteQuoteItem mutation
+
+        Args:
+            quote_uuid: UUID of the quote
+            quote_item_uuid: UUID of the quote item to remove
+
+        Returns:
+            Success message with deleted quote item UUID
+        """
+        try:
+            self.logger.info(f"Removing quote item: {arguments}")
+
+            variables = {
+                "quoteUuid": arguments["quote_uuid"],
+                "quoteItemUuid": arguments["quote_item_uuid"],
+                "updatedBy": "MCP",
+            }
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "deleteQuoteItem",
+                "Mutation",
+                variables,
+            )
+
+            response = humps.decamelize(result.get("deleteQuoteItem", {}))
+
+            self.logger.info(f"Successfully removed quote item {arguments['quote_item_uuid']} from quote {arguments['quote_uuid']}")
+            return response
+        except Exception as e:
+            self.logger.error(f"Failed to remove quote item: {e}")
             raise
 
     # * MCP Function.

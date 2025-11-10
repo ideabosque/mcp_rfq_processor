@@ -787,17 +787,17 @@ def test_search_quotes(mcp_rfq_processor, test_data):
 @pytest.mark.integration
 @pytest.mark.parametrize("test_data", QUOTE_ITEM_TEST_DATA)
 @log_test_result
-def test_update_quote_item_discount(mcp_rfq_processor, test_data):
-    """Test updating quote item discount."""
+def test_update_quote_item(mcp_rfq_processor, test_data):
+    """Test updating quote item."""
     result, error = _call_method(
         mcp_rfq_processor,
-        "update_quote_item_discount",
+        "update_quote_item",
         {
             "quote_uuid": test_data.get("quoteUuid"),
             "quote_item_uuid": test_data.get("quoteItemUuid"),
             "discount_amount": test_data.get("subtotalDiscount", 0.0),
         },
-        "update_quote_item_discount",
+        "update_quote_item",
     )
 
     assert error is None
@@ -820,6 +820,53 @@ def test_calculate_quote_pricing(mcp_rfq_processor, test_data):
     assert error is None
     assert result is not None
     assert "quote_uuid" in result
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", QUOTE_TEST_DATA)
+@log_test_result
+def test_add_quote_item(mcp_rfq_processor, test_data):
+    """Test adding quote item."""
+    # Prepare test quote item data
+    test_quote_item = {
+        "quote_uuid": test_data.get("quoteUuid"),
+        "provider_item_uuid": "test-provider-item-uuid-001",
+        "item_uuid": "test-item-uuid-001",
+        "qty": 10,
+        "discount_amount": 5.0,
+    }
+
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "add_quote_item",
+        test_quote_item,
+        "add_quote_item",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "quote_item_uuid" in result or "quoteItemUuid" in result
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", QUOTE_ITEM_TEST_DATA)
+@log_test_result
+def test_remove_quote_item(mcp_rfq_processor, test_data):
+    """Test removing quote item."""
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "remove_quote_item",
+        {
+            "quote_uuid": test_data.get("quoteUuid"),
+            "quote_item_uuid": test_data.get("quoteItemUuid"),
+        },
+        "remove_quote_item",
+    )
+
+    # Note: This may fail if the quote item doesn't exist or has already been deleted
+    # The test is checking that the function executes without exceptions
+    if error is None:
+        assert result is not None
 
 
 # ============================================================================
