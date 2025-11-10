@@ -47,18 +47,6 @@ MCP_CONFIGURATION = {
                         "description": "List of items in the request (array of JSON objects)",
                         "items": {"type": "object"},
                     },
-                    "total_amount": {
-                        "type": "number",
-                        "description": "Total amount for the request",
-                    },
-                    "total_discount": {
-                        "type": "number",
-                        "description": "Total discount applied",
-                    },
-                    "final_total_amount": {
-                        "type": "number",
-                        "description": "Final total amount after discounts",
-                    },
                     "notes": {
                         "type": "string",
                         "description": "Additional notes",
@@ -110,18 +98,6 @@ MCP_CONFIGURATION = {
                         "type": "array",
                         "description": "Updated list of items (array of JSON objects)",
                         "items": {"type": "object"},
-                    },
-                    "total_amount": {
-                        "type": "number",
-                        "description": "Updated total amount",
-                    },
-                    "total_discount": {
-                        "type": "number",
-                        "description": "Updated total discount",
-                    },
-                    "final_total_amount": {
-                        "type": "number",
-                        "description": "Updated final total amount",
                     },
                     "notes": {
                         "type": "string",
@@ -300,7 +276,7 @@ MCP_CONFIGURATION = {
         # Quote Management Tools (5)
         {
             "name": "create_quote",
-            "description": "Create new quote for RFQ request. IMPORTANT: Items cannot be added/deleted after creation. To modify items, update the request and create a new quote. Returns quote UUID and total amount.",
+            "description": "Create new quote for RFQ request. Returns quote UUID and total amount.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -312,6 +288,10 @@ MCP_CONFIGURATION = {
                         "type": "string",
                         "description": "Provider corporation external ID",
                     },
+                    "sales_rep_email": {
+                        "type": "string",
+                        "description": "Email of the sales representative",
+                    },
                     "shipping_method": {
                         "type": "string",
                         "description": "Shipping method (default: standard)",
@@ -320,7 +300,10 @@ MCP_CONFIGURATION = {
                         "type": "number",
                         "description": "Shipping cost",
                     },
-                    "tax_amount": {"type": "number", "description": "Tax amount"},
+                    "negotiation_rounds": {
+                        "type": "number",
+                        "description": "Number of negotiation rounds",
+                    },
                     "status": {
                         "type": "string",
                         "description": "Quote status (default: draft)",
@@ -333,35 +316,20 @@ MCP_CONFIGURATION = {
                         ],
                     },
                     "notes": {"type": "string", "description": "Additional notes"},
-                    "items": {
-                        "type": "array",
-                        "description": "Quote items to create",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "item_uuid": {"type": "string"},
-                                "provider_item_uuid": {"type": "string"},
-                                "quantity": {"type": "integer"},
-                                "unit_price": {"type": "number"},
-                            },
-                            "required": [
-                                "item_uuid",
-                                "provider_item_uuid",
-                                "quantity",
-                                "unit_price",
-                            ],
-                        },
-                    },
                 },
                 "required": ["request_uuid", "provider_corp_external_id"],
             },
         },
         {
             "name": "update_quote",
-            "description": "Update quote metadata (shipping, tax, status, notes). Cannot modify quote items - use update_quote_item_discount for item discounts. Returns updated quote information.",
+            "description": "Update quote metadata (shipping, negotiation rounds, status, notes). Returns updated quote information.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
+                    "request_uuid": {
+                        "type": "string",
+                        "description": "UUID of the request",
+                    },
                     "quote_uuid": {
                         "type": "string",
                         "description": "UUID of the quote to update",
@@ -374,9 +342,9 @@ MCP_CONFIGURATION = {
                         "type": "number",
                         "description": "Updated shipping cost",
                     },
-                    "tax_amount": {
+                    "negotiation_rounds": {
                         "type": "number",
-                        "description": "Updated tax amount",
+                        "description": "Updated negotiation rounds",
                     },
                     "status": {
                         "type": "string",
@@ -391,7 +359,7 @@ MCP_CONFIGURATION = {
                     },
                     "notes": {"type": "string", "description": "Updated notes"},
                 },
-                "required": ["quote_uuid"],
+                "required": ["request_uuid", "quote_uuid"],
             },
         },
         {
@@ -448,28 +416,52 @@ MCP_CONFIGURATION = {
         },
         {
             "name": "update_quote_item_discount",
-            "description": "Update discount for a specific quote item. This is the ONLY allowed modification to quote items after creation. Can set discount amount or percentage. Returns updated item totals.",
+            "description": "Update quote item including discount. Returns updated item totals.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
+                    "quote_uuid": {
+                        "type": "string",
+                        "description": "UUID of the quote",
+                    },
                     "quote_item_uuid": {
                         "type": "string",
                         "description": "UUID of the quote item to update",
                     },
+                    "provider_item_uuid": {
+                        "type": "string",
+                        "description": "UUID of the provider item",
+                    },
+                    "item_uuid": {
+                        "type": "string",
+                        "description": "UUID of the item",
+                    },
+                    "segment_uuid": {
+                        "type": "string",
+                        "description": "UUID of the segment",
+                    },
+                    "batch_no": {
+                        "type": "string",
+                        "description": "Batch number",
+                    },
+                    "request_uuid": {
+                        "type": "string",
+                        "description": "UUID of the request",
+                    },
+                    "request_data": {
+                        "type": "object",
+                        "description": "Request data (JSON object)",
+                    },
+                    "qty": {
+                        "type": "integer",
+                        "description": "Quantity",
+                    },
                     "discount_amount": {
                         "type": "number",
-                        "description": "Fixed discount amount",
-                    },
-                    "discount_percent": {
-                        "type": "number",
-                        "description": "Percentage discount (0-100)",
-                    },
-                    "discount_notes": {
-                        "type": "string",
-                        "description": "Notes about the discount",
+                        "description": "Discount amount (subtotal discount)",
                     },
                 },
-                "required": ["quote_item_uuid"],
+                "required": ["quote_uuid"],
             },
         },
         # Pricing Tools (3)
@@ -558,22 +550,37 @@ MCP_CONFIGURATION = {
                         "type": "string",
                         "description": "UUID of the quote",
                     },
+                    "request_uuid": {
+                        "type": "string",
+                        "description": "UUID of the request",
+                    },
                     "installment_number": {
                         "type": "integer",
-                        "description": "Installment sequence number",
+                        "description": "Installment sequence number (priority)",
+                    },
+                    "salesorder_no": {
+                        "type": "string",
+                        "description": "Sales order number",
                     },
                     "due_date": {
                         "type": "string",
-                        "description": "Payment due date (ISO 8601 format)",
+                        "description": "Payment due date / scheduled date (ISO 8601 format)",
                     },
-                    "amount": {"type": "number", "description": "Installment amount"},
+                    "installment_ratio": {
+                        "type": "number",
+                        "description": "Installment ratio (e.g., 0.5 for 50%)",
+                    },
+                    "amount": {
+                        "type": "number",
+                        "description": "Installment amount",
+                    },
                     "status": {
                         "type": "string",
                         "description": "Installment status (default: pending)",
                         "enum": ["pending", "paid", "overdue", "cancelled"],
                     },
                 },
-                "required": ["quote_uuid", "installment_number", "due_date", "amount"],
+                "required": ["quote_uuid"],
             },
         },
         {
@@ -605,7 +612,7 @@ MCP_CONFIGURATION = {
         # File Tools (2)
         {
             "name": "upload_rfq_file",
-            "description": "Upload document attachment to RFQ request (quotes, specifications, terms). Returns file UUID and URL.",
+            "description": "Upload document attachment to RFQ request (quotes, specifications, terms). Returns file UUID and metadata.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -613,17 +620,16 @@ MCP_CONFIGURATION = {
                         "type": "string",
                         "description": "UUID of the request",
                     },
-                    "file_name": {"type": "string", "description": "Name of the file"},
-                    "file_type": {
+                    "file_name": {
                         "type": "string",
-                        "description": "File type/category",
+                        "description": "Name of the file",
                     },
-                    "file_data": {
+                    "email": {
                         "type": "string",
-                        "description": "Base64 encoded file data",
+                        "description": "Email of the uploader",
                     },
                 },
-                "required": ["request_uuid", "file_name", "file_type", "file_data"],
+                "required": ["request_uuid", "file_name"],
             },
         },
         {
@@ -658,6 +664,14 @@ MCP_CONFIGURATION = {
             "inputSchema": {
                 "type": "object",
                 "properties": {
+                    "segment_uuid": {
+                        "type": "string",
+                        "description": "UUID of the segment (for updates)",
+                    },
+                    "provider_corp_external_id": {
+                        "type": "string",
+                        "description": "Provider corporation external ID",
+                    },
                     "segment_name": {
                         "type": "string",
                         "description": "Name of the segment",
@@ -682,7 +696,15 @@ MCP_CONFIGURATION = {
                     },
                     "contact_uuid": {
                         "type": "string",
-                        "description": "UUID of the contact",
+                        "description": "Email or UUID of the contact",
+                    },
+                    "contact_uuid_field": {
+                        "type": "string",
+                        "description": "UUID field of the contact",
+                    },
+                    "consumer_corp_external_id": {
+                        "type": "string",
+                        "description": "Consumer corporation external ID",
                     },
                 },
                 "required": ["segment_uuid", "contact_uuid"],
@@ -1018,9 +1040,6 @@ class MCPRfqProcessor:
                 "billingAddress": arguments.get("billing_address"),
                 "shippingAddress": arguments.get("shipping_address"),
                 "items": arguments.get("items"),
-                "totalAmount": arguments.get("total_amount"),
-                "totalDiscount": arguments.get("total_discount"),
-                "finalTotalAmount": arguments.get("final_total_amount"),
                 "notes": arguments.get("notes"),
                 "expiredAt": arguments.get("expired_at"),
                 "status": arguments.get("status", "pending"),
@@ -1066,9 +1085,6 @@ class MCPRfqProcessor:
                 "billingAddress": arguments.get("billing_address"),
                 "shippingAddress": arguments.get("shipping_address"),
                 "items": arguments.get("items"),
-                "totalAmount": arguments.get("total_amount"),
-                "totalDiscount": arguments.get("total_discount"),
-                "finalTotalAmount": arguments.get("final_total_amount"),
                 "notes": arguments.get("notes"),
                 "expiredAt": arguments.get("expired_at"),
                 "status": arguments.get("status"),
