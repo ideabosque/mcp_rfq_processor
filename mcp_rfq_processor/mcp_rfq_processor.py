@@ -10,6 +10,7 @@ from typing import Any, Dict
 
 import boto3
 import humps
+
 from silvaengine_utility import Utility
 
 # MCP Configuration
@@ -1325,14 +1326,18 @@ class MCPRfqProcessor:
 
             request = humps.decamelize(result["insertUpdateRequest"]["request"])
 
-            self.logger.info(f"Successfully added item to request {arguments['request_uuid']}")
+            self.logger.info(
+                f"Successfully added item to request {arguments['request_uuid']}"
+            )
             return request
         except Exception as e:
             self.logger.error(f"Failed to add item to RFQ request: {e}")
             raise
 
     # * MCP Function.
-    def remove_item_from_rfq_request(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+    def remove_item_from_rfq_request(
+        self, **arguments: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """
         Remove an item from an existing RFQ request.
         This is a convenience method that fetches the current request,
@@ -1367,26 +1372,36 @@ class MCPRfqProcessor:
                 item_uuid = arguments["item_uuid"]
                 # Find and remove item by UUID (check both snake_case and camelCase)
                 current_items = [
-                    item for item in current_items
-                    if item.get("item_uuid") != item_uuid and item.get("itemUuid") != item_uuid
+                    item
+                    for item in current_items
+                    if item.get("item_uuid") != item_uuid
+                    and item.get("itemUuid") != item_uuid
                 ]
                 if len(current_items) == original_length:
-                    raise ValueError(f"Item with UUID '{item_uuid}' not found in request")
+                    raise ValueError(
+                        f"Item with UUID '{item_uuid}' not found in request"
+                    )
                 self.logger.info(f"Removed item with UUID {item_uuid}")
 
             elif "item_name" in arguments:
                 item_name = arguments["item_name"]
                 # Find and remove item by name (check both snake_case and camelCase)
                 current_items = [
-                    item for item in current_items
-                    if item.get("item_name") != item_name and item.get("itemName") != item_name
+                    item
+                    for item in current_items
+                    if item.get("item_name") != item_name
+                    and item.get("itemName") != item_name
                 ]
                 if len(current_items) == original_length:
-                    raise ValueError(f"Item with name '{item_name}' not found in request")
+                    raise ValueError(
+                        f"Item with name '{item_name}' not found in request"
+                    )
                 self.logger.info(f"Removed item with name {item_name}")
 
             else:
-                raise ValueError("Must provide either item_uuid or item_name to remove an item")
+                raise ValueError(
+                    "Must provide either item_uuid or item_name to remove an item"
+                )
 
             # Update request with modified items array
             variables = {
@@ -1405,7 +1420,9 @@ class MCPRfqProcessor:
 
             request = humps.decamelize(result["insertUpdateRequest"]["request"])
 
-            self.logger.info(f"Successfully removed item from request {arguments['request_uuid']}")
+            self.logger.info(
+                f"Successfully removed item from request {arguments['request_uuid']}"
+            )
             return request
         except Exception as e:
             self.logger.error(f"Failed to remove item from RFQ request: {e}")
@@ -1706,7 +1723,9 @@ class MCPRfqProcessor:
 
             quote_item = humps.decamelize(result["insertUpdateQuoteItem"]["quoteItem"])
 
-            self.logger.info(f"Successfully added quote item to quote {arguments['quote_uuid']}")
+            self.logger.info(
+                f"Successfully added quote item to quote {arguments['quote_uuid']}"
+            )
             return quote_item
         except Exception as e:
             self.logger.error(f"Failed to add quote item: {e}")
@@ -1743,7 +1762,9 @@ class MCPRfqProcessor:
 
             response = humps.decamelize(result.get("deleteQuoteItem", {}))
 
-            self.logger.info(f"Successfully removed quote item {arguments['quote_item_uuid']} from quote {arguments['quote_uuid']}")
+            self.logger.info(
+                f"Successfully removed quote item {arguments['quote_item_uuid']} from quote {arguments['quote_uuid']}"
+            )
             return response
         except Exception as e:
             self.logger.error(f"Failed to remove quote item: {e}")
