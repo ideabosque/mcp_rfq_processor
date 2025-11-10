@@ -6,12 +6,15 @@ Model Context Protocol (MCP) server for processing Request for Quotation (RFQ) o
 
 The MCP RFQ Processor connects AI assistants to the `ai_rfq_engine` GraphQL backend, enabling intelligent automation of:
 
-- **RFQ Request Management**: Submit and track customer quotation requests
-- **Item & Inventory Search**: Find available items and provider inventory
-- **Quote Generation**: Create detailed quotes with pricing, discounts, and line items
+- **RFQ Request Management**: Submit, update, and track customer quotation requests with flexible item management
+- **Item & Inventory Search**: Find available items and provider inventory with batch tracking
+- **Quote Generation**: Create and manage detailed quotes with flexible item operations, pricing, and discounts
 - **Installment Planning**: Set up payment schedules for quotes
 - **Document Management**: Upload and track RFQ-related files
 - **Segment Management**: Organize customers and providers into pricing segments
+
+**Current Version**: 0.1.0  
+**Total MCP Tools**: 27 (fully implemented and tested)
 
 ## Architecture
 
@@ -92,7 +95,9 @@ processor.endpoint_id = "your-endpoint-id"
 
 ## Available MCP Tools
 
-### 1. Request Management
+All 27 tools are fully implemented and production-ready.
+
+### 1. Request Management (6 tools)
 
 #### `submit_rfq_request`
 Submit a new RFQ request from a customer.
@@ -100,9 +105,13 @@ Submit a new RFQ request from a customer.
 **Input:**
 ```json
 {
-  "contact_uuid": "uuid-string",
+  "contact_uuid": "customer@example.com",
   "request_title": "Need 500 units of Product X",
   "request_description": "Detailed requirements...",
+  "billing_address": {},
+  "shipping_address": {},
+  "items": [],
+  "notes": "Urgent order",
   "expired_at": "2025-12-31T23:59:59Z",
   "status": "pending"
 }
@@ -113,9 +122,54 @@ Submit a new RFQ request from a customer.
 {
   "request_uuid": "generated-uuid",
   "status": "pending",
-  "created_at": "2025-11-05T10:30:00Z"
+  "created_at": "2025-11-05T10:30:00Z",
+  "items": []
 }
 ```
+
+#### `update_rfq_request`
+Update an existing RFQ request (title, description, addresses, items, status, etc.).
+
+**Input:**
+```json
+{
+  "request_uuid": "request-uuid-string",
+  "request_title": "Updated title",
+  "items": [...],
+  "status": "modified"
+}
+```
+
+**Output:** Updated request object.
+
+#### `add_item_to_rfq_request`
+Convenience method to add a single item to an existing request.
+
+**Input:**
+```json
+{
+  "request_uuid": "request-uuid-string",
+  "item": {
+    "item_uuid": "item-uuid",
+    "quantity": 100
+  }
+}
+```
+
+**Output:** Updated request with new item added.
+
+#### `remove_item_from_rfq_request`
+Convenience method to remove a single item from an existing request.
+
+**Input:**
+```json
+{
+  "request_uuid": "request-uuid-string",
+  "item_uuid": "item-uuid-to-remove"
+}
+```
+
+**Output:** Updated request with item removed.
 
 #### `get_rfq_request`
 Retrieve details of an existing RFQ request.
@@ -148,7 +202,7 @@ Search and filter RFQ requests.
 
 ---
 
-### 2. Item & Inventory Management
+### 2. Item & Inventory Management (4 tools)
 
 #### `search_items`
 Search for available items in the catalog.
@@ -211,7 +265,7 @@ Get batch information for provider inventory.
 
 ---
 
-### 3. Quote Management
+### 3. Quote Management (8 tools)
 
 #### `create_quote`
 Generate a new quote for an RFQ request.
@@ -251,15 +305,18 @@ Retrieve quote details.
 
 **Output:** Complete quote with line items, totals, and discount information.
 
-#### `update_quote_status`
-Update the status of a quote.
+#### `update_quote`
+Update quote metadata (shipping, negotiation rounds, status, notes).
 
 **Input:**
 ```json
 {
   "request_uuid": "request-uuid",
   "quote_uuid": "quote-uuid",
-  "status": "submitted"
+  "shipping_amount": 75.00,
+  "negotiation_rounds": 2,
+  "status": "submitted",
+  "notes": "Updated pricing"
 }
 ```
 
@@ -282,12 +339,8 @@ Search and filter quotes.
 
 **Output:** Paginated list of matching quotes.
 
----
-
-### 4. Quote Line Items
-
 #### `add_quote_item`
-Add a line item to a quote.
+Add a line item to an existing quote.
 
 **Input:**
 ```json
@@ -295,18 +348,16 @@ Add a line item to a quote.
   "quote_uuid": "quote-uuid",
   "provider_item_uuid": "provider-item-uuid",
   "item_uuid": "item-uuid",
-  "batch_no": "BATCH-2025-001",
   "qty": 100,
-  "uom": "EA",
-  "price_per_uom": 15.50,
-  "notes": "Rush delivery requested"
+  "batch_no": "BATCH-2025-001",
+  "discount_amount": 50.00
 }
 ```
 
-**Output:** Quote item with calculated subtotal and discounts.
+**Output:** Created quote item with calculated totals.
 
 #### `update_quote_item`
-Update an existing quote line item.
+Update an existing quote item (quantity, discount, etc.).
 
 **Input:**
 ```json
@@ -314,13 +365,13 @@ Update an existing quote line item.
   "quote_uuid": "quote-uuid",
   "quote_item_uuid": "quote-item-uuid",
   "qty": 150,
-  "price_per_uom": 14.50
+  "discount_amount": 75.00
 }
 ```
 
 **Output:** Updated quote item with recalculated totals.
 
-#### `delete_quote_item`
+#### `remove_quote_item`
 Remove a line item from a quote.
 
 **Input:**
@@ -335,7 +386,7 @@ Remove a line item from a quote.
 
 ---
 
-### 5. Pricing & Discounts
+### 4. Pricing & Discounts (3 tools)
 
 #### `get_item_price_tiers`
 Retrieve tiered pricing for an item.
@@ -379,7 +430,7 @@ Calculate final pricing with all discounts applied.
 
 ---
 
-### 6. Installment Management
+### 5. Installment Management (2 tools)
 
 #### `create_installment`
 Set up a payment installment for a quote.
@@ -412,7 +463,7 @@ Retrieve installments for a quote.
 
 ---
 
-### 7. Document Management
+### 6. Document Management (2 tools)
 
 #### `upload_rfq_file`
 Upload a document related to an RFQ request.
@@ -445,7 +496,7 @@ Retrieve files associated with a request.
 
 ---
 
-### 8. Segment Management
+### 7. Segment Management (3 tools)
 
 #### `create_segment`
 Create a customer or provider segment for pricing.

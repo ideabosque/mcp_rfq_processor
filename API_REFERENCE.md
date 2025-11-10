@@ -4,6 +4,10 @@
 
 This document provides a comprehensive reference for the GraphQL API operations used by the MCP RFQ Processor, including all queries, mutations, and type definitions from the `ai_rfq_engine` GraphQL backend.
 
+**Version**: 0.1.0  
+**Total MCP Tools**: 27 (all implemented)  
+**GraphQL Endpoint**: ai_rfq_graphql (AWS Lambda)
+
 ## Table of Contents
 
 1. [GraphQL Schema Overview](#graphql-schema-overview)
@@ -643,30 +647,37 @@ type Segment {
 
 ## MCP Tool to GraphQL Mapping
 
-| MCP Tool | GraphQL Operation | Type | Notes |
-|----------|-------------------|------|-------|
-| submit_rfq_request | insertUpdateRequest | Mutation | Create new request |
-| update_rfq_request | insertUpdateRequest | Mutation | Update existing request |
-| get_rfq_request | request | Query | Retrieve single request |
-| search_rfq_requests | requestList | Query | Search with filters |
-| search_items | itemList | Query | Search catalog |
-| get_item | item | Query | Get item details |
-| get_provider_items | providerItemList | Query | Search inventory |
-| get_provider_item_batches | providerItemBatchList | Query | Get batch info |
-| create_quote | insertUpdateQuote | Mutation | Create new quote |
-| update_quote | insertUpdateQuote | Mutation | Update quote metadata |
-| update_quote_item_discount | insertUpdateQuoteItem | Mutation | Update item discount only |
-| get_quote | quote | Query | Retrieve quote |
-| search_quotes | quoteList | Query | Search quotes |
-| get_item_price_tiers | itemPriceTierList | Query | Get tiered pricing |
-| get_discount_rules | discountRuleList | Query | Get discount rules |
-| create_installment | insertUpdateInstallment | Mutation | Create installment |
-| get_installments | installmentList | Query | Get installment schedule |
-| upload_rfq_file | insertUpdateFile | Mutation | Upload document |
-| get_rfq_files | fileList | Query | Get files |
-| create_segment | insertUpdateSegment | Mutation | Create segment |
-| add_contact_to_segment | insertUpdateSegmentContact | Mutation | Add contact |
-| get_segment_contacts | segmentContactList | Query | List contacts |
+**Total MCP Tools**: 27 (all implemented)
+
+| # | MCP Tool | GraphQL Operation | Type | Category | Notes |
+|---|----------|-------------------|------|----------|-------|
+| 1 | submit_rfq_request | insertUpdateRequest | Mutation | Request | Create new request |
+| 2 | update_rfq_request | insertUpdateRequest | Mutation | Request | Update existing request |
+| 3 | add_item_to_rfq_request | insertUpdateRequest | Mutation | Request | Convenience: add single item |
+| 4 | remove_item_from_rfq_request | insertUpdateRequest | Mutation | Request | Convenience: remove single item |
+| 5 | get_rfq_request | request | Query | Request | Retrieve single request |
+| 6 | search_rfq_requests | requestList | Query | Request | Search with filters |
+| 7 | search_items | itemList | Query | Item | Search catalog |
+| 8 | get_item | item | Query | Item | Get item details |
+| 9 | get_provider_items | providerItemList | Query | Item | Search inventory |
+| 10 | get_provider_item_batches | providerItemBatchList | Query | Item | Get batch info |
+| 11 | create_quote | insertUpdateQuote | Mutation | Quote | Create new quote |
+| 12 | update_quote | insertUpdateQuote | Mutation | Quote | Update quote metadata |
+| 13 | add_quote_item | insertUpdateQuoteItem | Mutation | Quote | Add item to quote |
+| 14 | update_quote_item | insertUpdateQuoteItem | Mutation | Quote | Update quote item |
+| 15 | remove_quote_item | deleteQuoteItem | Mutation | Quote | Remove item from quote |
+| 16 | get_quote | quote | Query | Quote | Retrieve quote |
+| 17 | search_quotes | quoteList | Query | Quote | Search quotes |
+| 18 | get_item_price_tiers | itemPriceTierList | Query | Pricing | Get tiered pricing |
+| 19 | get_discount_rules | discountRuleList | Query | Pricing | Get discount rules |
+| 20 | calculate_quote_pricing | Multiple | Query | Pricing | Business logic combining queries |
+| 21 | create_installment | insertUpdateInstallment | Mutation | Installment | Create installment |
+| 22 | get_installments | installmentList | Query | Installment | Get installment schedule |
+| 23 | upload_rfq_file | insertUpdateFile | Mutation | File | Upload document |
+| 24 | get_rfq_files | fileList | Query | File | Get files |
+| 25 | create_segment | insertUpdateSegment | Mutation | Segment | Create segment |
+| 26 | add_contact_to_segment | insertUpdateSegmentContact | Mutation | Segment | Add contact |
+| 27 | get_segment_contacts | segmentContactList | Query | Segment | List contacts |
 
 ---
 
@@ -886,14 +897,18 @@ mutation {
 
 ## Notes
 
-1. **Quote Item Modification**: After quote creation, items cannot be added or deleted. To modify items, update the request and create a new quote.
+1. **Flexible Quote Item Management**: The implementation allows adding, updating, and removing quote items directly using dedicated tools (`add_quote_item`, `update_quote_item`, `remove_quote_item`).
 
-2. **Discount Updates**: Quote item discounts can be updated after creation using `insertUpdateQuoteItem`.
+2. **Request Item Convenience Methods**: Use `add_item_to_rfq_request` and `remove_item_from_rfq_request` for convenient single-item operations on requests.
 
-3. **Pricing Calculation**: The backend automatically recalculates `totalQuoteAmount` when quote items or metadata (shipping, tax) are updated.
+3. **Pricing Calculation**: The backend automatically recalculates `totalQuoteAmount` when quote items or metadata (shipping, negotiation_rounds) are updated.
 
 4. **Date Format**: All dates use ISO 8601 format (e.g., "2025-12-31T23:59:59Z").
 
 5. **Currency**: All monetary values are in the configured default currency (USD by default).
 
 6. **Pagination**: Default page limit is 50. Use `pageNumber` and `limit` for pagination.
+
+7. **Contact UUID**: In the implementation, `contact_uuid` typically refers to email addresses for contact identification.
+
+8. **Error Handling**: All tools include comprehensive error handling with detailed logging via Python's logging module.
