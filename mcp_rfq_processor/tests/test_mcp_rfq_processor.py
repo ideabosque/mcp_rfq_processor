@@ -368,7 +368,7 @@ def test_get_segment_contacts(mcp_rfq_processor, test_data):
 
     assert error is None
     assert result is not None
-    assert "total_count" in result
+    assert "total" in result
 
 
 # ============================================================================
@@ -390,7 +390,7 @@ def test_search_items(mcp_rfq_processor, test_data):
 
     assert error is None
     assert result is not None
-    assert "total_count" in result
+    assert "total" in result
 
 
 @pytest.mark.integration
@@ -424,7 +424,7 @@ def test_get_provider_items(mcp_rfq_processor, test_data):
 
     assert error is None
     assert result is not None
-    assert "total_count" in result
+    assert "total" in result
 
 
 @pytest.mark.integration
@@ -441,7 +441,7 @@ def test_get_provider_item_batches(mcp_rfq_processor, test_data):
 
     assert error is None
     assert result is not None
-    assert "total_count" in result
+    assert "total" in result
 
 
 # ============================================================================
@@ -463,7 +463,7 @@ def test_get_item_price_tiers(mcp_rfq_processor, test_data):
 
     assert error is None
     assert result is not None
-    assert "total_count" in result
+    assert "total" in result
 
 
 @pytest.mark.integration
@@ -480,7 +480,7 @@ def test_get_discount_rules(mcp_rfq_processor, test_data):
 
     assert error is None
     assert result is not None
-    assert "total_count" in result
+    assert "total" in result
 
 
 # ============================================================================
@@ -540,7 +540,7 @@ def test_search_rfq_requests(mcp_rfq_processor, test_data):
 
     assert error is None
     assert result is not None
-    assert "total_count" in result
+    assert "total" in result
 
 
 @pytest.mark.integration
@@ -649,7 +649,6 @@ def test_remove_item_from_rfq_request_by_uuid(mcp_rfq_processor, test_data):
         or item.get("itemUuid") == item_uuid_to_remove
         for item in remaining_items
     ), "Item was not removed from request"
-
 
 @pytest.mark.integration
 @pytest.mark.parametrize("test_data", REQUEST_TEST_DATA)
@@ -781,7 +780,7 @@ def test_search_quotes(mcp_rfq_processor, test_data):
 
     assert error is None
     assert result is not None
-    assert "total_count" in result
+    assert "total" in result
 
 
 @pytest.mark.integration
@@ -910,7 +909,7 @@ def test_get_installments(mcp_rfq_processor, test_data):
 
     assert error is None
     assert result is not None
-    assert "total_count" in result
+    assert "total" in result
 
 
 # ============================================================================
@@ -952,7 +951,7 @@ def test_get_rfq_files(mcp_rfq_processor, test_data):
 
     assert error is None
     assert result is not None
-    assert "total_count" in result
+    assert "total" in result
 
 
 # ============================================================================
