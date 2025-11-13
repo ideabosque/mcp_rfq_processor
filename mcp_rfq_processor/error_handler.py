@@ -1,3 +1,9 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+from __future__ import annotations
+
+__author__ = "bibow"
+
 """
 Centralized error handling module for MCP RFQ Processor.
 
@@ -9,11 +15,10 @@ This module provides:
 - Validation utilities (validate_not_empty, propagate_error_if_present)
 """
 
-import traceback
 import re
+import traceback
 from functools import wraps
-from typing import Dict, Any, Callable, Optional
-from logging import Logger
+from typing import Any, Callable, Dict, Optional
 
 
 # Error Code Constants
@@ -41,7 +46,12 @@ class ErrorCode:
 class MCPError(Exception):
     """Base exception class for MCP RFQ Processor errors."""
 
-    def __init__(self, message: str, error_code: str = ErrorCode.UNKNOWN_ERROR, details: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        message: str,
+        error_code: str = ErrorCode.UNKNOWN_ERROR,
+        details: Optional[Dict[str, Any]] = None,
+    ):
         """
         Initialize MCP error.
 
@@ -59,14 +69,24 @@ class MCPError(Exception):
 class GraphQLError(MCPError):
     """Exception raised for GraphQL-related errors."""
 
-    def __init__(self, message: str, error_code: str = ErrorCode.GRAPHQL_QUERY_FAILED, details: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        message: str,
+        error_code: str = ErrorCode.GRAPHQL_QUERY_FAILED,
+        details: Optional[Dict[str, Any]] = None,
+    ):
         super().__init__(message, error_code, details)
 
 
 class ValidationError(MCPError):
     """Exception raised for validation errors."""
 
-    def __init__(self, message: str, error_code: str = ErrorCode.VALIDATION_FAILED, details: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        message: str,
+        error_code: str = ErrorCode.VALIDATION_FAILED,
+        details: Optional[Dict[str, Any]] = None,
+    ):
         super().__init__(message, error_code, details)
 
 
@@ -103,7 +123,7 @@ def build_error_response(
     message: str,
     error_code: str = ErrorCode.UNKNOWN_ERROR,
     details: Optional[Dict[str, Any]] = None,
-    include_code: bool = True
+    include_code: bool = True,
 ) -> Dict[str, Any]:
     """
     Build standardized error response dictionary.
@@ -129,8 +149,7 @@ def build_error_response(
 
 
 def build_error_from_exception(
-    exception: Exception,
-    include_code: bool = True
+    exception: Exception, include_code: bool = True
 ) -> Dict[str, Any]:
     """
     Build error response from an exception instance.
@@ -147,7 +166,7 @@ def build_error_from_exception(
             message=exception.message,
             error_code=exception.error_code,
             details=exception.details,
-            include_code=include_code
+            include_code=include_code,
         )
     else:
         # For standard exceptions, extract clean message
@@ -155,15 +174,13 @@ def build_error_from_exception(
         return build_error_response(
             message=clean_message,
             error_code=ErrorCode.UNKNOWN_ERROR,
-            include_code=include_code
+            include_code=include_code,
         )
 
 
 # Error Handler Decorator
 def handle_errors(
-    operation_name: str,
-    log_traceback: bool = False,
-    include_error_code: bool = True
+    operation_name: str, log_traceback: bool = False, include_error_code: bool = True
 ) -> Callable:
     """
     Decorator for consistent error handling across methods.
@@ -184,6 +201,7 @@ def handle_errors(
             # Your business logic here
             return {"id": "123"}
     """
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         def wrapper(self, *args, **kwargs) -> Dict[str, Any]:
@@ -220,11 +238,14 @@ def handle_errors(
                 return build_error_from_exception(e, include_error_code)
 
         return wrapper
+
     return decorator
 
 
 # Validation Utilities
-def validate_not_empty(value: Any, field_name: str, error_message: Optional[str] = None) -> None:
+def validate_not_empty(
+    value: Any, field_name: str, error_message: Optional[str] = None
+) -> None:
     """
     Validate that a value is not empty.
 
@@ -240,8 +261,12 @@ def validate_not_empty(value: Any, field_name: str, error_message: Optional[str]
         message = error_message or f"{field_name} cannot be empty"
         raise ValidationError(
             message=message,
-            error_code=ErrorCode.NO_ITEMS_FOUND if "items" in field_name.lower() else ErrorCode.VALIDATION_FAILED,
-            details={"field": field_name}
+            error_code=(
+                ErrorCode.NO_ITEMS_FOUND
+                if "items" in field_name.lower()
+                else ErrorCode.VALIDATION_FAILED
+            ),
+            details={"field": field_name},
         )
 
 

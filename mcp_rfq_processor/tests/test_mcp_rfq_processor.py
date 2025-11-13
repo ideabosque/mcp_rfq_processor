@@ -694,6 +694,356 @@ def test_remove_item_from_rfq_request_by_name(mcp_rfq_processor, test_data):
     ), "Item was not removed from request"
 
 
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", REQUEST_TEST_DATA)
+@log_test_result
+def test_assign_provider_item_to_request_item(mcp_rfq_processor, test_data):
+    """Test assigning provider item to request item using provider_items array."""
+    # First, get the request to see current items
+    get_result, get_error = _call_method(
+        mcp_rfq_processor,
+        "get_rfq_request",
+        {"request_uuid": test_data.get("requestUuid")},
+        "get_rfq_request_before_assign",
+    )
+
+    assert get_error is None
+    assert get_result is not None
+
+    items = get_result.get("items", [])
+    if not items:
+        pytest.skip("No items in request to test provider item assignment")
+
+    # Get the first item's UUID
+    first_item = items[0]
+    item_uuid = first_item.get("item_uuid")
+
+    if not item_uuid:
+        pytest.skip("Item does not have UUID for provider item assignment test")
+
+    # Test provider item data to assign
+    test_provider_item_uuid = items[0]["provider_items"][0]["provider_item_uuid"]
+    test_batch_no = items[0]["provider_items"][0]["batch_no"]
+    test_qty = 50
+
+    # Assign provider item to the item (replace mode)
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "assign_provider_item_to_request_item",
+        {
+            "request_uuid": test_data.get("requestUuid"),
+            "item_uuid": item_uuid,
+            "provider_item_uuid": test_provider_item_uuid,
+            "batch_no": test_batch_no,
+            "qty": test_qty,
+            "add_qty": False,  # Replace mode
+        },
+        "assign_provider_item_to_request_item",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "request_uuid" in result
+    assert "items" in result
+
+    # Verify the provider item was assigned to provider_items array
+    updated_items = result.get("items", [])
+    assigned_item = next(
+        (item for item in updated_items if item.get("item_uuid") == item_uuid), None
+    )
+    assert assigned_item is not None, "Item not found in updated request"
+    assert "provider_items" in assigned_item, "provider_items array not found in item"
+
+    provider_items = assigned_item.get("provider_items", [])
+    assert len(provider_items) > 0, "No provider items in array"
+
+    # Find the assigned provider item
+    assigned_provider_item = next(
+        (
+            pi
+            for pi in provider_items
+            if pi.get("provider_item_uuid") == test_provider_item_uuid
+        ),
+        None,
+    )
+    assert (
+        assigned_provider_item is not None
+    ), "Provider item not found in provider_items array"
+    assert (
+        assigned_provider_item.get("batch_no") == test_batch_no
+    ), "Batch number not set correctly"
+    assert assigned_provider_item.get("qty") == test_qty, "Quantity not set correctly"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", REQUEST_TEST_DATA)
+@log_test_result
+def test_assign_provider_item_add_qty_mode(mcp_rfq_processor, test_data):
+    """Test assigning provider item with add_qty mode."""
+    # First, get the request to see current items
+    get_result, get_error = _call_method(
+        mcp_rfq_processor,
+        "get_rfq_request",
+        {"request_uuid": test_data.get("requestUuid")},
+        "get_rfq_request_before_add_qty",
+    )
+
+    assert get_error is None
+    assert get_result is not None
+
+    items = get_result.get("items", [])
+    if not items:
+        pytest.skip("No items in request to test provider item assignment")
+
+    # Get the first item's UUID
+    first_item = items[0]
+    item_uuid = first_item.get("item_uuid")
+
+    if not item_uuid:
+        pytest.skip("Item does not have UUID for provider item assignment test")
+
+    # Test provider item data
+    test_provider_item_uuid = items[0]["provider_items"][0]["provider_item_uuid"]
+    test_batch_no = items[0]["provider_items"][0]["batch_no"]
+    initial_qty = 30
+
+    # First assignment - create provider item
+    result1, error1 = _call_method(
+        mcp_rfq_processor,
+        "assign_provider_item_to_request_item",
+        {
+            "request_uuid": test_data.get("requestUuid"),
+            "item_uuid": item_uuid,
+            "provider_item_uuid": test_provider_item_uuid,
+            "batch_no": test_batch_no,
+            "qty": initial_qty,
+            "add_qty": False,
+        },
+        "assign_provider_item_initial",
+    )
+
+    assert error1 is None
+    assert result1 is not None
+
+    # Second assignment - add to existing quantity
+    add_qty = 25
+    result2, error2 = _call_method(
+        mcp_rfq_processor,
+        "assign_provider_item_to_request_item",
+        {
+            "request_uuid": test_data.get("requestUuid"),
+            "item_uuid": item_uuid,
+            "provider_item_uuid": test_provider_item_uuid,
+            "batch_no": test_batch_no,
+            "qty": add_qty,
+            "add_qty": True,  # Add mode
+        },
+        "assign_provider_item_add_qty",
+    )
+
+    assert error2 is None
+    assert result2 is not None
+
+    # Verify the quantity was added
+    updated_items = result2.get("items", [])
+    assigned_item = next(
+        (item for item in updated_items if item.get("item_uuid") == item_uuid), None
+    )
+    assert assigned_item is not None
+
+    provider_items = assigned_item.get("provider_items", [])
+    assigned_provider_item = next(
+        (
+            pi
+            for pi in provider_items
+            if pi.get("provider_item_uuid") == test_provider_item_uuid
+            and pi.get("batch_no") == test_batch_no
+        ),
+        None,
+    )
+    assert assigned_provider_item is not None
+    expected_qty = initial_qty + add_qty
+    assert (
+        assigned_provider_item.get("qty") == expected_qty
+    ), f"Expected qty {expected_qty}, got {assigned_provider_item.get('qty')}"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", REQUEST_TEST_DATA)
+@log_test_result
+def test_remove_provider_item_from_request_item(mcp_rfq_processor, test_data):
+    """Test removing provider item assignment from request item using provider_items array."""
+    # First, get the request to see current items
+    get_result, get_error = _call_method(
+        mcp_rfq_processor,
+        "get_rfq_request",
+        {"request_uuid": test_data.get("requestUuid")},
+        "get_rfq_request_before_remove_provider_item",
+    )
+
+    assert get_error is None
+    assert get_result is not None
+
+    items = get_result.get("items", [])
+    if not items:
+        pytest.skip("No items in request to test provider item removal")
+
+    # Get the first item's UUID
+    first_item = items[0]
+    item_uuid = first_item.get("item_uuid")
+
+    if not item_uuid:
+        pytest.skip("Item does not have UUID for provider item removal test")
+
+    # Check if item has provider_items
+    provider_items = first_item.get("provider_items", [])
+    if not provider_items:
+        pytest.skip("Item has no provider items to remove")
+
+    # Get the first provider item to remove
+    first_provider_item = provider_items[0]
+    provider_item_uuid_to_remove = first_provider_item.get("provider_item_uuid")
+    batch_no_to_match = first_provider_item.get("batch_no")
+
+    if not provider_item_uuid_to_remove:
+        pytest.skip("Provider item does not have UUID for removal test")
+
+    # Remove provider item from the item
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "remove_provider_item_from_request_item",
+        {
+            "request_uuid": test_data.get("requestUuid"),
+            "item_uuid": item_uuid,
+            "provider_item_uuid": provider_item_uuid_to_remove,
+            "batch_no": batch_no_to_match,
+        },
+        "remove_provider_item_from_request_item",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "request_uuid" in result
+    assert "items" in result
+    assert result.get("status") == "modified"
+
+    # Verify the provider item assignment was removed
+    updated_items = result.get("items", [])
+    updated_item = next(
+        (item for item in updated_items if item.get("item_uuid") == item_uuid), None
+    )
+    assert updated_item is not None, "Item not found in updated request"
+
+    updated_provider_items = updated_item.get("provider_items", [])
+    # Verify the specific provider item was removed
+    removed_provider_item = next(
+        (
+            pi
+            for pi in updated_provider_items
+            if pi.get("provider_item_uuid") == provider_item_uuid_to_remove
+            and (batch_no_to_match is None or pi.get("batch_no") == batch_no_to_match)
+        ),
+        None,
+    )
+    assert (
+        removed_provider_item is None
+    ), "Provider item was not removed from provider_items array"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", REQUEST_TEST_DATA)
+@log_test_result
+def test_remove_all_provider_item_instances(mcp_rfq_processor, test_data):
+    """Test removing all instances of a provider item regardless of batch_no."""
+    # First, get the request to see current items
+    get_result, get_error = _call_method(
+        mcp_rfq_processor,
+        "get_rfq_request",
+        {"request_uuid": test_data.get("requestUuid")},
+        "get_rfq_request_before_remove_all_instances",
+    )
+
+    assert get_error is None
+    assert get_result is not None
+
+    items = get_result.get("items", [])
+    if not items:
+        pytest.skip("No items in request to test provider item removal")
+
+    # Get the first item's UUID
+    first_item = items[0]
+    item_uuid = first_item.get("item_uuid")
+
+    if not item_uuid:
+        pytest.skip("Item does not have UUID for provider item removal test")
+
+    # Add multiple provider items with different batches
+    test_provider_item_uuid = "test-provider-item-uuid-003"
+
+    # Add first batch
+    _call_method(
+        mcp_rfq_processor,
+        "assign_provider_item_to_request_item",
+        {
+            "request_uuid": test_data.get("requestUuid"),
+            "item_uuid": item_uuid,
+            "provider_item_uuid": test_provider_item_uuid,
+            "batch_no": "BATCH-A",
+            "qty": 10,
+        },
+        "assign_provider_item_batch_a",
+    )
+
+    # Add second batch
+    _call_method(
+        mcp_rfq_processor,
+        "assign_provider_item_to_request_item",
+        {
+            "request_uuid": test_data.get("requestUuid"),
+            "item_uuid": item_uuid,
+            "provider_item_uuid": test_provider_item_uuid,
+            "batch_no": "BATCH-B",
+            "qty": 20,
+        },
+        "assign_provider_item_batch_b",
+    )
+
+    # Remove all instances without specifying batch_no
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "remove_provider_item_from_request_item",
+        {
+            "request_uuid": test_data.get("requestUuid"),
+            "item_uuid": item_uuid,
+            "provider_item_uuid": test_provider_item_uuid,
+            # batch_no not specified - should remove all instances
+        },
+        "remove_all_provider_item_instances",
+    )
+
+    assert error is None
+    assert result is not None
+    assert result.get("status") == "modified"
+
+    # Verify all instances were removed
+    updated_items = result.get("items", [])
+    updated_item = next(
+        (item for item in updated_items if item.get("item_uuid") == item_uuid), None
+    )
+    assert updated_item is not None
+
+    updated_provider_items = updated_item.get("provider_items", [])
+    # Verify no instances of the provider item remain
+    remaining_instances = [
+        pi
+        for pi in updated_provider_items
+        if pi.get("provider_item_uuid") == test_provider_item_uuid
+    ]
+    assert (
+        len(remaining_instances) == 0
+    ), f"Expected 0 instances, found {len(remaining_instances)}"
+
+
 # ============================================================================
 # QUOTE MANAGEMENT TESTS
 # ============================================================================

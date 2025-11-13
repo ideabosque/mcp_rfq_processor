@@ -223,6 +223,66 @@ MCP_CONFIGURATION = {
                 "required": ["request_uuid"],
             },
         },
+        {
+            "name": "assign_provider_item_to_request_item",
+            "description": "Assign a provider item to a specific item in an RFQ request. Adds the provider item to the item's provider_items array with optional batch number and quantity. If the provider item already exists (with matching batch_no), quantity can be added or replaced based on add_qty flag. Returns the updated request with status set to 'modified'.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request_uuid": {
+                        "type": "string",
+                        "description": "UUID of the request to update",
+                    },
+                    "item_uuid": {
+                        "type": "string",
+                        "description": "UUID of the item in the request to assign provider item to",
+                    },
+                    "provider_item_uuid": {
+                        "type": "string",
+                        "description": "UUID of the provider item to assign",
+                    },
+                    "batch_no": {
+                        "type": "string",
+                        "description": "Optional batch number for the provider item",
+                    },
+                    "qty": {
+                        "type": "integer",
+                        "description": "Optional quantity for this provider item (defaults to item qty if not specified)",
+                    },
+                    "add_qty": {
+                        "type": "boolean",
+                        "description": "If true, add to existing quantity; if false, replace quantity (default: false)",
+                    },
+                },
+                "required": ["request_uuid", "item_uuid", "provider_item_uuid"],
+            },
+        },
+        {
+            "name": "remove_provider_item_from_request_item",
+            "description": "Remove provider item assignment from a specific item in an RFQ request. Removes the provider item from the item's provider_items array. If provider_item_uuid is not specified, removes all provider items. If batch_no is not specified, removes all instances of the provider_item_uuid regardless of batch. Returns the updated request with status set to 'modified'.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request_uuid": {
+                        "type": "string",
+                        "description": "UUID of the request to update",
+                    },
+                    "item_uuid": {
+                        "type": "string",
+                        "description": "UUID of the item in the request to remove provider item from",
+                    },
+                    "provider_item_uuid": {
+                        "type": "string",
+                        "description": "UUID of the provider item to remove (optional, removes all provider items if not specified)",
+                    },
+                    "batch_no": {
+                        "type": "string",
+                        "description": "Optional batch number to match. If not specified, removes all instances of the provider_item_uuid regardless of batch",
+                    },
+                },
+                "required": ["request_uuid", "item_uuid"],
+            },
+        },
         # Item Management Tools (4)
         {
             "name": "search_items",
@@ -879,6 +939,22 @@ MCP_CONFIGURATION = {
             "function_name": "remove_item_from_rfq_request",
             "return_type": "text",
         },
+        {
+            "type": "tool",
+            "name": "assign_provider_item_to_request_item",
+            "module_name": "mcp_rfq_processor",
+            "class_name": "MCPRfqProcessor",
+            "function_name": "assign_provider_item_to_request_item",
+            "return_type": "text",
+        },
+        {
+            "type": "tool",
+            "name": "remove_provider_item_from_request_item",
+            "module_name": "mcp_rfq_processor",
+            "class_name": "MCPRfqProcessor",
+            "function_name": "remove_provider_item_from_request_item",
+            "return_type": "text",
+        },
         # Item Management Tools
         {
             "type": "tool",
@@ -1486,6 +1562,299 @@ class MCPRfqProcessor:
 
         self.logger.info(
             f"Successfully removed item from request {arguments['request_uuid']}"
+        )
+        return request
+
+    # * MCP Function.
+    @handle_errors(operation_name="assign provider item to request item")
+    def assign_provider_item_to_request_item(
+        self, **arguments: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Assign a provider item to a specific item in an RFQ request.
+        This is a convenience method that fetches the current request,
+        finds the specified item, and adds the provider item to the provider_items array.
+
+        Args:
+            request_uuid: UUID of the request to update
+            item_uuid: UUID of the item in the request
+            provider_item_uuid: UUID of the provider item to assign
+            batch_no: Optional batch number
+            qty: Quantity for this provider item (optional, defaults to item qty)
+            add_qty: If True, add to existing quantity; if False, replace quantity (default: False)
+
+        Returns:
+            Updated request with the provider item assigned
+
+        Example item structure:
+        {
+          "item_uuid": "04540718329890843199",
+          "item_name": "Steel Plate",
+          "request_data": {},
+          "qty": 100,
+          "provider_items": [
+            {
+              "provider_item_uuid": "76109526415051866240",
+              "batch_no": "BATCH-001",
+              "qty": 100
+            }
+          ]
+        }
+        """
+        self.logger.info(f"Assigning provider item to request item: {arguments}")
+
+        # Validate required fields
+        validate_not_empty(
+            arguments.get("request_uuid"), "request_uuid", "Request UUID is required"
+        )
+        validate_not_empty(
+            arguments.get("item_uuid"), "item_uuid", "Item UUID is required"
+        )
+        validate_not_empty(
+            arguments.get("provider_item_uuid"),
+            "provider_item_uuid",
+            "Provider item UUID is required",
+        )
+
+        # Fetch current request
+        current_request = self.get_rfq_request(request_uuid=arguments["request_uuid"])
+
+        # Check if current_request has an error and propagate if present
+        if error := propagate_error_if_present(current_request):
+            return error
+
+        # Get current items and validate
+        current_items = current_request.get("items", [])
+        validate_not_empty(current_items, "items", "No items found in the request")
+
+        # Find the item and add to provider_items array
+        item_found = False
+        item_uuid = arguments["item_uuid"]
+        provider_item_uuid = arguments["provider_item_uuid"]
+        batch_no = arguments.get("batch_no")
+        provider_qty = arguments.get("qty")
+        add_qty = arguments.get("add_qty", False)  # Default to replace behavior
+
+        for item in current_items:
+            if item.get("item_uuid") == item_uuid:
+                item_found = True
+
+                # Initialize provider_items array if it doesn't exist
+                if "provider_items" not in item or item["provider_items"] is None:
+                    item["provider_items"] = []
+
+                # Check if this provider_item already exists
+                existing_provider_item = None
+                for pi in item["provider_items"]:
+                    if pi.get("provider_item_uuid") == provider_item_uuid:
+                        # Match by batch_no (including None)
+                        if pi.get("batch_no") == batch_no:
+                            existing_provider_item = pi
+                            break
+
+                if existing_provider_item:
+                    if provider_qty is not None:
+                        if add_qty:
+                            # Add to existing quantity
+                            existing_provider_item["qty"] = (
+                                existing_provider_item.get("qty", 0) + provider_qty
+                            )
+                            self.logger.info(
+                                f"Added {provider_qty} to existing provider item {provider_item_uuid} for item {item_uuid}, new qty: {existing_provider_item['qty']}"
+                            )
+                        else:
+                            # Replace quantity
+                            existing_provider_item["qty"] = provider_qty
+                            self.logger.info(
+                                f"Replaced quantity for existing provider item {provider_item_uuid} for item {item_uuid}, new qty: {provider_qty}"
+                            )
+                else:
+                    # Add new provider item
+                    new_provider_item = {"provider_item_uuid": provider_item_uuid}
+                    if batch_no is not None:
+                        new_provider_item["batch_no"] = batch_no
+                    if provider_qty is not None:
+                        new_provider_item["qty"] = provider_qty
+                    else:
+                        # Default to item qty if not specified
+                        new_provider_item["qty"] = item.get("qty", 0)
+
+                    item["provider_items"].append(new_provider_item)
+                    self.logger.info(
+                        f"Added provider item {provider_item_uuid} to item {item_uuid}"
+                    )
+
+                break
+
+        if not item_found:
+            raise ValidationError(
+                message=f"Item with UUID '{item_uuid}' not found in request",
+                error_code=ErrorCode.ITEM_NOT_FOUND,
+                details={
+                    "item_uuid": item_uuid,
+                    "request_uuid": arguments["request_uuid"],
+                },
+            )
+
+        # Update request with modified items array
+        variables = {
+            "requestUuid": arguments["request_uuid"],
+            "items": current_items,
+            "updatedBy": "MCP",
+        }
+
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "insertUpdateRequest",
+            "Mutation",
+            variables,
+        )
+
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
+
+        request = humps.decamelize(result["insertUpdateRequest"]["request"])
+
+        self.logger.info(
+            f"Successfully assigned provider item to item in request {arguments['request_uuid']}"
+        )
+        return request
+
+    # * MCP Function.
+    @handle_errors(operation_name="remove provider item from request item")
+    def remove_provider_item_from_request_item(
+        self, **arguments: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Remove a provider item assignment from a specific item in an RFQ request.
+        This is a convenience method that fetches the current request,
+        finds the specified item, and removes the provider item from the provider_items array.
+
+        Args:
+            request_uuid: UUID of the request to update
+            item_uuid: UUID of the item in the request
+            provider_item_uuid: UUID of the provider item to remove (optional, removes all if not specified)
+            batch_no: Optional batch number to match (if provider_item_uuid is specified)
+
+        Returns:
+            Updated request with the provider item assignment removed
+        """
+        self.logger.info(f"Removing provider item from request item: {arguments}")
+
+        # Validate required fields
+        validate_not_empty(
+            arguments.get("request_uuid"), "request_uuid", "Request UUID is required"
+        )
+        validate_not_empty(
+            arguments.get("item_uuid"), "item_uuid", "Item UUID is required"
+        )
+
+        # Fetch current request
+        current_request = self.get_rfq_request(request_uuid=arguments["request_uuid"])
+
+        # Check if current_request has an error and propagate if present
+        if error := propagate_error_if_present(current_request):
+            return error
+
+        # Get current items and validate
+        current_items = current_request.get("items", [])
+        validate_not_empty(current_items, "items", "No items found in the request")
+
+        # Find the item and remove from provider_items array
+        item_found = False
+        item_uuid = arguments["item_uuid"]
+        provider_item_uuid = arguments.get("provider_item_uuid")
+        batch_no = arguments.get("batch_no")
+
+        for item in current_items:
+            if item.get("item_uuid") == item_uuid:
+                item_found = True
+
+                if "provider_items" not in item or item["provider_items"] is None:
+                    self.logger.info(f"Item {item_uuid} has no provider items")
+                    break
+
+                if provider_item_uuid is None:
+                    # Remove all provider items
+                    item["provider_items"] = []
+                    self.logger.info(
+                        f"Removed all provider items from item {item_uuid}"
+                    )
+                else:
+                    # Remove specific provider item(s)
+                    original_length = len(item["provider_items"])
+
+                    if batch_no is None:
+                        # Remove all instances of this provider_item_uuid regardless of batch_no
+                        item["provider_items"] = [
+                            pi
+                            for pi in item["provider_items"]
+                            if pi.get("provider_item_uuid") != provider_item_uuid
+                        ]
+                        self.logger.info(
+                            f"Removed all instances of provider item {provider_item_uuid} from item {item_uuid}"
+                        )
+                    else:
+                        # Remove only the specific provider_item_uuid with matching batch_no
+                        item["provider_items"] = [
+                            pi
+                            for pi in item["provider_items"]
+                            if not (
+                                pi.get("provider_item_uuid") == provider_item_uuid
+                                and pi.get("batch_no") == batch_no
+                            )
+                        ]
+                        self.logger.info(
+                            f"Removed provider item {provider_item_uuid} with batch_no {batch_no} from item {item_uuid}"
+                        )
+
+                    if len(item["provider_items"]) == original_length:
+                        raise ValidationError(
+                            message=f"Provider item with UUID '{provider_item_uuid}'{' and batch_no ' + batch_no if batch_no else ''} not found in item",
+                            error_code=ErrorCode.ITEM_NOT_FOUND,
+                            details={
+                                "provider_item_uuid": provider_item_uuid,
+                                "batch_no": batch_no,
+                                "item_uuid": item_uuid,
+                                "request_uuid": arguments["request_uuid"],
+                            },
+                        )
+
+                break
+
+        if not item_found:
+            raise ValidationError(
+                message=f"Item with UUID '{item_uuid}' not found in request",
+                error_code=ErrorCode.ITEM_NOT_FOUND,
+                details={
+                    "item_uuid": item_uuid,
+                    "request_uuid": arguments["request_uuid"],
+                },
+            )
+
+        # Update request with modified items array
+        variables = {
+            "requestUuid": arguments["request_uuid"],
+            "items": current_items,
+            "updatedBy": "MCP",
+        }
+
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "insertUpdateRequest",
+            "Mutation",
+            variables,
+        )
+
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
+
+        request = humps.decamelize(result["insertUpdateRequest"]["request"])
+
+        self.logger.info(
+            f"Successfully removed provider item from item in request {arguments['request_uuid']}"
         )
         return request
 

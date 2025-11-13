@@ -14,7 +14,7 @@ The MCP RFQ Processor connects AI assistants to the `ai_rfq_engine` GraphQL back
 - **Segment Management**: Organize customers and providers into pricing segments
 
 **Current Version**: 0.1.1  
-**Total MCP Tools**: 27 (fully implemented and tested)
+**Total MCP Tools**: 29 (fully implemented and tested)
 
 ### What's New in v0.1.1
 
