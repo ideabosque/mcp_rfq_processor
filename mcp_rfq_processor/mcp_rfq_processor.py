@@ -10,7 +10,6 @@ from typing import Any, Dict
 
 import boto3
 import humps
-
 from silvaengine_utility import Utility
 
 # Import centralized error handling utilities
@@ -386,7 +385,7 @@ MCP_CONFIGURATION = {
                 },
             },
         },
-        # Quote Management Tools (5)
+        # Quote Management Tools (3)
         {
             "name": "create_quote",
             "description": "Create new quote for RFQ request. Returns quote UUID and total amount. Note: shipping_method and shipping_amount cannot be set during creation - use update_quote after creation to set these fields. The 'rounds' field (negotiation rounds) is automatically calculated by the backend.",
@@ -559,66 +558,6 @@ MCP_CONFIGURATION = {
                     },
                 },
                 "required": ["quote_uuid"],
-            },
-        },
-        {
-            "name": "add_quote_item",
-            "description": "Add a new item to an existing quote. Returns the created quote item with calculated totals, slow_move_item flag (indicates slow-moving inventory), and guardrail_price_per_uom (minimum acceptable price). If batch_no is provided, these values come from the batch; otherwise slow_move_item defaults to false.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "quote_uuid": {
-                        "type": "string",
-                        "description": "UUID of the quote",
-                    },
-                    "provider_item_uuid": {
-                        "type": "string",
-                        "description": "UUID of the provider item",
-                    },
-                    "item_uuid": {
-                        "type": "string",
-                        "description": "UUID of the item",
-                    },
-                    "qty": {
-                        "type": "integer",
-                        "description": "Quantity",
-                    },
-                    "segment_uuid": {
-                        "type": "string",
-                        "description": "UUID of the segment (optional)",
-                    },
-                    "batch_no": {
-                        "type": "string",
-                        "description": "Batch number (optional)",
-                    },
-                    "request_data": {
-                        "type": "object",
-                        "description": "Request data (JSON object, optional)",
-                    },
-                    "discount_amount": {
-                        "type": "number",
-                        "description": "Discount amount (optional)",
-                    },
-                },
-                "required": ["quote_uuid", "provider_item_uuid", "item_uuid", "qty"],
-            },
-        },
-        {
-            "name": "remove_quote_item",
-            "description": "Remove an item from an existing quote. Returns success confirmation.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "quote_uuid": {
-                        "type": "string",
-                        "description": "UUID of the quote",
-                    },
-                    "quote_item_uuid": {
-                        "type": "string",
-                        "description": "UUID of the quote item to remove",
-                    },
-                },
-                "required": ["quote_uuid", "quote_item_uuid"],
             },
         },
         # Pricing Tools (3)
@@ -1027,22 +966,6 @@ MCP_CONFIGURATION = {
             "module_name": "mcp_rfq_processor",
             "class_name": "MCPRfqProcessor",
             "function_name": "update_quote_item",
-            "return_type": "text",
-        },
-        {
-            "type": "tool",
-            "name": "add_quote_item",
-            "module_name": "mcp_rfq_processor",
-            "class_name": "MCPRfqProcessor",
-            "function_name": "add_quote_item",
-            "return_type": "text",
-        },
-        {
-            "type": "tool",
-            "name": "remove_quote_item",
-            "module_name": "mcp_rfq_processor",
-            "class_name": "MCPRfqProcessor",
-            "function_name": "remove_quote_item",
             "return_type": "text",
         },
         # Pricing Tools
@@ -1981,16 +1904,21 @@ class MCPRfqProcessor:
     @handle_errors(operation_name="create quote")
     def create_quote(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Create new quote for RFQ request.
+        Create new quote for RFQ request based on request items.
         Maps to GraphQL: insertUpdateQuote mutation
+
+        This method automatically creates quote items from the request's items.
+        For each request item with provider_items assigned, a corresponding quote item is created.
 
         Note:
         - 'rounds' (negotiation rounds) is auto-calculated by backend based on existing quotes from the same provider
         - shipping_method and shipping_amount cannot be set during creation, use update_quote instead
-        - After creation, quote items can be managed using add_quote_item, update_quote_item, and remove_quote_item
+        - Quote items are automatically created from request items with provider_items
+        - After creation, quote items can be managed using update_quote_item
         """
         self.logger.info(f"Creating quote: {arguments}")
 
+        # First, create the quote
         variables = {
             "requestUuid": arguments["request_uuid"],
             "providerCorpExternalId": arguments["provider_corp_external_id"],
@@ -2016,6 +1944,53 @@ class MCPRfqProcessor:
             return error
 
         quote = humps.decamelize(result["insertUpdateQuote"]["quote"])
+
+        # Now fetch the request to get items with provider_items
+        request = self.get_rfq_request(request_uuid=arguments["request_uuid"])
+
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(request):
+            return error
+
+        # Create quote items from request items that have provider_items assigned
+        request_items = request.get("items", [])
+        if request_items:
+            self.logger.info(f"Creating quote items from {len(request_items)} request items")
+
+            for req_item in request_items:
+                provider_items = req_item.get("provider_items", [])
+
+                if provider_items:
+                    # Create a quote item for each provider_item
+                    for provider_item in provider_items:
+                        try:
+                            quote_item_args = {
+                                "quote_uuid": quote["quote_uuid"],
+                                "provider_item_uuid": provider_item.get("provider_item_uuid"),
+                                "item_uuid": req_item.get("item_uuid"),
+                                "qty": provider_item.get("qty", req_item.get("qty", 0)),
+                                "batch_no": provider_item.get("batch_no"),
+                                "request_data": req_item.get("request_data"),
+                            }
+
+                            # Use the private method to add quote item
+                            self._add_quote_item(**quote_item_args)
+
+                        except Exception as e:
+                            self.logger.warning(
+                                f"Failed to create quote item for provider_item {provider_item.get('provider_item_uuid')}: {e}"
+                            )
+                else:
+                    self.logger.info(
+                        f"Skipping request item {req_item.get('item_uuid')} - no provider_items assigned"
+                    )
+
+        # Fetch the updated quote with all quote items
+        quote = self.get_quote(quote_uuid=quote["quote_uuid"])
+
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(quote):
+            return error
 
         return quote
 
@@ -2113,9 +2088,9 @@ class MCPRfqProcessor:
 
         return quote_item
 
-    # * MCP Function.
+    # * Private helper method (not exposed as MCP tool)
     @handle_errors(operation_name="add quote item")
-    def add_quote_item(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+    def _add_quote_item(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Add a quote item to an existing quote.
         This is a convenience method that adds a new item using insertUpdateQuoteItem mutation.
@@ -2170,9 +2145,9 @@ class MCPRfqProcessor:
         )
         return quote_item
 
-    # * MCP Function.
+    # * Private helper method (not exposed as MCP tool)
     @handle_errors(operation_name="remove quote item")
-    def remove_quote_item(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+    def _remove_quote_item(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Remove a quote item from an existing quote.
         Maps to GraphQL: deleteQuoteItem mutation
