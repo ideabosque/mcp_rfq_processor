@@ -56,8 +56,9 @@ logger = logging.getLogger("test_mcp_rfq_processor")
 base_dir = os.getenv("base_dir", os.getcwd())
 sys.path.insert(0, base_dir)
 sys.path.insert(0, os.path.join(base_dir, "silvaengine_utility"))
-sys.path.insert(1, os.path.join(base_dir, "mcp_rfq_processor"))
-sys.path.insert(2, os.path.join(base_dir, "ai_rfq_engine"))
+sys.path.insert(0, os.path.join(base_dir, "silvaengine_dynamodb_base"))
+sys.path.insert(0, os.path.join(base_dir, "mcp_rfq_processor"))
+sys.path.insert(0, os.path.join(base_dir, "ai_rfq_engine"))
 
 from mcp_rfq_processor.mcp_rfq_processor import MCPRfqProcessor
 
@@ -570,12 +571,7 @@ def test_update_rfq_request(mcp_rfq_processor, test_data):
 def test_add_item_to_rfq_request(mcp_rfq_processor, test_data):
     """Test adding item to RFQ request."""
     # Prepare a test item to add
-    test_item = {
-        "item_uuid": "test-item-uuid-001",
-        "item_name": "Test Item",
-        "quantity": 10,
-        "uom": "EA",
-    }
+    test_item = test_data.get("items")[0]
 
     result, error = _call_method(
         mcp_rfq_processor,
@@ -594,9 +590,7 @@ def test_add_item_to_rfq_request(mcp_rfq_processor, test_data):
     # Verify the item was added
     items = result.get("items", [])
     assert any(
-        item.get("item_uuid") == test_item["item_uuid"]
-        or item.get("itemUuid") == test_item["item_uuid"]
-        for item in items
+        item.get("item_uuid") == test_item["item_uuid"] for item in items
     ), "Added item not found in request"
 
 
@@ -622,7 +616,7 @@ def test_remove_item_from_rfq_request_by_uuid(mcp_rfq_processor, test_data):
 
     # Get the first item's UUID
     first_item = items[0]
-    item_uuid_to_remove = first_item.get("item_uuid") or first_item.get("itemUuid")
+    item_uuid_to_remove = first_item.get("item_uuid")
 
     if not item_uuid_to_remove:
         pytest.skip("Item does not have UUID for removal test")
@@ -645,10 +639,9 @@ def test_remove_item_from_rfq_request_by_uuid(mcp_rfq_processor, test_data):
     # Verify the item was removed
     remaining_items = result.get("items", [])
     assert not any(
-        item.get("item_uuid") == item_uuid_to_remove
-        or item.get("itemUuid") == item_uuid_to_remove
-        for item in remaining_items
+        item.get("item_uuid") == item_uuid_to_remove for item in remaining_items
     ), "Item was not removed from request"
+
 
 @pytest.mark.integration
 @pytest.mark.parametrize("test_data", REQUEST_TEST_DATA)

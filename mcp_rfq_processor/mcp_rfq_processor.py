@@ -13,6 +13,18 @@ import humps
 
 from silvaengine_utility import Utility
 
+# Import centralized error handling utilities
+from .error_handler import (
+    ErrorCode,
+    GraphQLError,
+    ValidationError,
+    build_error_response,
+    extract_error_message,
+    handle_errors,
+    propagate_error_if_present,
+    validate_not_empty,
+)
+
 # MCP Configuration
 MCP_CONFIGURATION = {
     "tools": [
@@ -317,7 +329,7 @@ MCP_CONFIGURATION = {
         # Quote Management Tools (5)
         {
             "name": "create_quote",
-            "description": "Create new quote for RFQ request. Returns quote UUID and total amount. Note: shipping_method and shipping_amount cannot be set during creation - use update_quote after creation to set these fields.",
+            "description": "Create new quote for RFQ request. Returns quote UUID and total amount. Note: shipping_method and shipping_amount cannot be set during creation - use update_quote after creation to set these fields. The 'rounds' field (negotiation rounds) is automatically calculated by the backend.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -351,7 +363,7 @@ MCP_CONFIGURATION = {
         },
         {
             "name": "update_quote",
-            "description": "Update quote metadata (shipping, status, notes). Returns updated quote information. Note: negotiation rounds are auto-calculated by the backend.",
+            "description": "Update quote metadata (shipping, status, notes). Returns updated quote information. Note: rounds (negotiation rounds) are auto-calculated by the backend based on existing quotes from the same provider.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -651,13 +663,9 @@ MCP_CONFIGURATION = {
                         "type": "string",
                         "description": "Payment due date / scheduled date (ISO 8601 format)",
                     },
-                    "installment_ratio": {
-                        "type": "number",
-                        "description": "Installment ratio (e.g., 0.5 for 50%)",
-                    },
                     "amount": {
                         "type": "number",
-                        "description": "Installment amount",
+                        "description": "Installment amount (installment_ratio will be auto-calculated based on quote total)",
                     },
                     "status": {
                         "type": "string",
@@ -1105,8 +1113,13 @@ class MCPRfqProcessor:
         except Exception as e:
             log = traceback.format_exc()
             self.logger.error(log)
-            raise Exception(
-                f"Failed to fetch GraphQL schema: {function_name}/{self.endpoint_id}. Please check the configuration and ensure all required settings are properly. Error: {e}"
+            raise GraphQLError(
+                message=f"Failed to fetch GraphQL schema: {function_name}/{self.endpoint_id}. Please check the configuration and ensure all required settings are properly. Error: {e}",
+                error_code=ErrorCode.GRAPHQL_SCHEMA_FETCH_FAILED,
+                details={
+                    "function_name": function_name,
+                    "endpoint_id": self.endpoint_id,
+                },
             )
 
     def _execute_graphql_query(
@@ -1132,55 +1145,65 @@ class MCPRfqProcessor:
                 execute_mode=self.setting.get("execute_mode"),
                 aws_lambda=self._aws_lambda,
             )
-        except Exception as e:
+        except GraphQLError as e:
+            # GraphQL-specific errors from _fetch_graphql_schema
             log = traceback.format_exc()
             self.logger.error(log)
-            raise Exception(
-                f"Failed to execute GraphQL query ({function_name}/{self.endpoint_id}). Error: {e}"
+            return build_error_response(e.message, e.error_code, e.details)
+        except Exception as e:
+            # Other unexpected errors
+            log = traceback.format_exc()
+            self.logger.error(log)
+            return build_error_response(
+                extract_error_message(str(e)),
+                ErrorCode.GRAPHQL_QUERY_FAILED,
+                {"function_name": function_name, "operation": operation_name},
             )
 
     # ==================== Request Management Tools ====================
 
     # * MCP Function.
+    @handle_errors(operation_name="submit RFQ request")
     def submit_rfq_request(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Submit new RFQ request.
         Maps to GraphQL: insertUpdateRequest mutation
         """
-        try:
-            self.logger.info(f"Submitting RFQ request: {arguments}")
+        self.logger.info(f"Submitting RFQ request: {arguments}")
 
-            variables = {
-                "email": arguments["contact_uuid"],
-                "requestTitle": arguments["request_title"],
-                "requestDescription": arguments.get("request_description", ""),
-                "billingAddress": arguments.get("billing_address"),
-                "shippingAddress": arguments.get("shipping_address"),
-                "items": arguments.get("items"),
-                "notes": arguments.get("notes"),
-                "expiredAt": arguments.get("expired_at"),
-                "status": arguments.get("status", "pending"),
-                "updatedBy": "MCP",
-            }
+        variables = {
+            "email": arguments["contact_uuid"],
+            "requestTitle": arguments["request_title"],
+            "requestDescription": arguments.get("request_description", ""),
+            "billingAddress": arguments.get("billing_address"),
+            "shippingAddress": arguments.get("shipping_address"),
+            "items": arguments.get("items"),
+            "notes": arguments.get("notes"),
+            "expiredAt": arguments.get("expired_at"),
+            "status": arguments.get("status", "pending"),
+            "updatedBy": "MCP",
+        }
 
-            # Remove None values
-            variables = {k: v for k, v in variables.items() if v is not None}
+        # Remove None values
+        variables = {k: v for k, v in variables.items() if v is not None}
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "insertUpdateRequest",
-                "Mutation",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "insertUpdateRequest",
+            "Mutation",
+            variables,
+        )
 
-            request = humps.decamelize(result["insertUpdateRequest"]["request"])
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
 
-            return request
-        except Exception as e:
-            self.logger.error(f"Failed to submit RFQ: {e}")
-            raise
+        request = humps.decamelize(result["insertUpdateRequest"]["request"])
+
+        return request
 
     # * MCP Function.
+    @handle_errors(operation_name="update RFQ request")
     def update_rfq_request(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Update existing RFQ request metadata.
@@ -1194,147 +1217,179 @@ class MCPRfqProcessor:
         Note: You can also use add_item_to_rfq_request or remove_item_from_rfq_request
         for individual item modifications.
         """
-        try:
-            self.logger.info(f"Updating RFQ request: {arguments}")
+        self.logger.info(f"Updating RFQ request: {arguments}")
 
-            variables = {
-                "requestUuid": arguments["request_uuid"],
-                "email": arguments.get("contact_uuid"),
-                "requestTitle": arguments.get("request_title"),
-                "requestDescription": arguments.get("request_description"),
-                "billingAddress": arguments.get("billing_address"),
-                "shippingAddress": arguments.get("shipping_address"),
-                "items": arguments.get("items"),
-                "notes": arguments.get("notes"),
-                "expiredAt": arguments.get("expired_at"),
-                "status": arguments.get("status"),
-                "updatedBy": "MCP",
-            }
+        variables = {
+            "requestUuid": arguments["request_uuid"],
+            "email": arguments.get("contact_uuid"),
+            "requestTitle": arguments.get("request_title"),
+            "requestDescription": arguments.get("request_description"),
+            "billingAddress": arguments.get("billing_address"),
+            "shippingAddress": arguments.get("shipping_address"),
+            "items": arguments.get("items"),
+            "notes": arguments.get("notes"),
+            "expiredAt": arguments.get("expired_at"),
+            "status": arguments.get("status"),
+            "updatedBy": "MCP",
+        }
 
-            # Remove None values to only update provided fields
-            variables = {k: v for k, v in variables.items() if v is not None}
+        # Remove None values to only update provided fields
+        variables = {k: v for k, v in variables.items() if v is not None}
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "insertUpdateRequest",
-                "Mutation",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "insertUpdateRequest",
+            "Mutation",
+            variables,
+        )
 
-            request = humps.decamelize(result["insertUpdateRequest"]["request"])
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
 
-            return request
-        except Exception as e:
-            self.logger.error(f"Failed to update RFQ: {e}")
-            raise
+        request = humps.decamelize(result["insertUpdateRequest"]["request"])
+
+        return request
 
     # * MCP Function.
+    @handle_errors(operation_name="get RFQ request")
     def get_rfq_request(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Retrieve RFQ request details.
         Maps to GraphQL: request query
         """
-        try:
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "request",
-                "Query",
-                {"requestUuid": arguments["request_uuid"]},
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "request",
+            "Query",
+            {"requestUuid": arguments["request_uuid"]},
+        )
 
-            return humps.decamelize(result["request"])
-        except Exception as e:
-            self.logger.error(f"Failed to get request: {e}")
-            raise
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
+
+        return humps.decamelize(result["request"])
 
     # * MCP Function.
+    @handle_errors(operation_name="search RFQ requests")
     def search_rfq_requests(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Search RFQ requests with filters.
         Maps to GraphQL: requestList query
         """
-        try:
-            variables = {
-                "pageNumber": arguments.get("page_number", 1),
-                "limit": arguments.get("limit", 20),
-                "contactUuid": arguments.get("contact_uuid"),
-                "statuses": arguments.get("statuses"),
-                "fromExpiredAt": arguments.get("from_expired_at"),
-                "toExpiredAt": arguments.get("to_expired_at"),
-            }
+        variables = {
+            "pageNumber": arguments.get("page_number", 1),
+            "limit": arguments.get("limit", 20),
+            "contactUuid": arguments.get("contact_uuid"),
+            "statuses": arguments.get("statuses"),
+            "fromExpiredAt": arguments.get("from_expired_at"),
+            "toExpiredAt": arguments.get("to_expired_at"),
+        }
 
-            # Remove None values
-            variables = {k: v for k, v in variables.items() if v is not None}
+        # Remove None values
+        variables = {k: v for k, v in variables.items() if v is not None}
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "requestList",
-                "Query",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "requestList",
+            "Query",
+            variables,
+        )
 
-            return humps.decamelize(result["requestList"])
-        except Exception as e:
-            self.logger.error(f"Failed to search requests: {e}")
-            raise
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
+
+        return humps.decamelize(result["requestList"])
 
     # * MCP Function.
+    @handle_errors(operation_name="add item to RFQ request")
     def add_item_to_rfq_request(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Add an item to an existing RFQ request.
         This is a convenience method that fetches the current request,
         adds the new item to the items array, and updates the request.
 
+        If the item already exists (matched by item_uuid), the quantity will be merged.
+
         Args:
             request_uuid: UUID of the request to update
             item: Item object to add (JSON object with item details)
 
         Returns:
-            Updated request with the new item added
+            Updated request with the new item added or quantity merged
         """
-        try:
-            self.logger.info(f"Adding item to RFQ request: {arguments}")
+        self.logger.info(f"Adding item to RFQ request: {arguments}")
 
-            # Fetch current request
-            current_request = self.get_rfq_request(
-                request_uuid=arguments["request_uuid"]
-            )
+        # Fetch current request
+        current_request = self.get_rfq_request(request_uuid=arguments["request_uuid"])
 
-            # Get current items or initialize empty array
-            current_items = current_request.get("items", [])
-            if current_items is None:
-                current_items = []
+        # Check if current_request has an error and propagate if present
+        if error := propagate_error_if_present(current_request):
+            return error
 
-            # Add new item
-            new_item = arguments["item"]
+        # Get current items or initialize empty array
+        current_items = current_request.get("items", [])
+        if current_items is None:
+            current_items = []
+
+        # Get new item details
+        new_item = arguments["item"]
+        new_item_uuid = new_item.get("item_uuid") or new_item.get("itemUuid")
+
+        # Check if item already exists and merge quantity if so
+        item_found = False
+        if new_item_uuid:
+            for existing_item in current_items:
+                existing_item_uuid = existing_item.get(
+                    "item_uuid"
+                ) or existing_item.get("itemUuid")
+                if existing_item_uuid == new_item_uuid:
+                    # Item exists - merge quantities
+                    existing_qty = existing_item.get("qty", 0)
+                    new_qty = new_item.get("qty", 0)
+                    merged_qty = existing_qty + new_qty
+                    existing_item["qty"] = merged_qty
+
+                    item_found = True
+                    self.logger.info(
+                        f"Merged quantity for item {new_item_uuid}: {existing_qty} + {new_qty} = {merged_qty}"
+                    )
+                    break
+
+        # If item doesn't exist, add it as new
+        if not item_found:
             current_items.append(new_item)
+            self.logger.info(f"Added new item to request")
 
-            # Update request with new items array
-            variables = {
-                "requestUuid": arguments["request_uuid"],
-                "items": current_items,
-                "status": "modified",  # Mark as modified when items change
-                "updatedBy": "MCP",
-            }
+        # Update request with new items array
+        variables = {
+            "requestUuid": arguments["request_uuid"],
+            "items": current_items,
+            "updatedBy": "MCP",
+        }
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "insertUpdateRequest",
-                "Mutation",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "insertUpdateRequest",
+            "Mutation",
+            variables,
+        )
 
-            request = humps.decamelize(result["insertUpdateRequest"]["request"])
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
 
-            self.logger.info(
-                f"Successfully added item to request {arguments['request_uuid']}"
-            )
-            return request
-        except Exception as e:
-            self.logger.error(f"Failed to add item to RFQ request: {e}")
-            raise
+        request = humps.decamelize(result["insertUpdateRequest"]["request"])
+
+        self.logger.info(
+            f"Successfully added item to request {arguments['request_uuid']}"
+        )
+        return request
 
     # * MCP Function.
+    @handle_errors(operation_name="remove item from RFQ request")
     def remove_item_from_rfq_request(
         self, **arguments: Dict[str, Any]
     ) -> Dict[str, Any]:
@@ -1352,163 +1407,173 @@ class MCPRfqProcessor:
         Returns:
             Updated request with the item removed
         """
-        try:
-            self.logger.info(f"Removing item from RFQ request: {arguments}")
+        self.logger.info(f"Removing item from RFQ request: {arguments}")
 
-            # Fetch current request
-            current_request = self.get_rfq_request(
-                request_uuid=arguments["request_uuid"]
-            )
+        # Fetch current request
+        current_request = self.get_rfq_request(request_uuid=arguments["request_uuid"])
 
-            # Get current items
-            current_items = current_request.get("items", [])
-            if not current_items:
-                raise ValueError("No items found in the request")
+        # Check if current_request has an error and propagate if present
+        if error := propagate_error_if_present(current_request):
+            return error
 
-            # Remove item by UUID or name
-            original_length = len(current_items)
+        # Get current items and validate
+        current_items = current_request.get("items", [])
+        validate_not_empty(current_items, "items", "No items found in the request")
 
-            if "item_uuid" in arguments:
-                item_uuid = arguments["item_uuid"]
-                # Find and remove item by UUID (check both snake_case and camelCase)
-                current_items = [
-                    item
-                    for item in current_items
-                    if item.get("item_uuid") != item_uuid
-                    and item.get("itemUuid") != item_uuid
-                ]
-                if len(current_items) == original_length:
-                    raise ValueError(
-                        f"Item with UUID '{item_uuid}' not found in request"
-                    )
-                self.logger.info(f"Removed item with UUID {item_uuid}")
+        # Remove item by UUID or name
+        original_length = len(current_items)
 
-            elif "item_name" in arguments:
-                item_name = arguments["item_name"]
-                # Find and remove item by name (check both snake_case and camelCase)
-                current_items = [
-                    item
-                    for item in current_items
-                    if item.get("item_name") != item_name
-                    and item.get("itemName") != item_name
-                ]
-                if len(current_items) == original_length:
-                    raise ValueError(
-                        f"Item with name '{item_name}' not found in request"
-                    )
-                self.logger.info(f"Removed item with name {item_name}")
-
-            else:
-                raise ValueError(
-                    "Must provide either item_uuid or item_name to remove an item"
+        if "item_uuid" in arguments:
+            item_uuid = arguments["item_uuid"]
+            # Find and remove item by UUID (check both snake_case and camelCase)
+            current_items = [
+                item for item in current_items if item.get("item_uuid") != item_uuid
+            ]
+            if len(current_items) == original_length:
+                raise ValidationError(
+                    message=f"Item with UUID '{item_uuid}' not found in request",
+                    error_code=ErrorCode.ITEM_NOT_FOUND,
+                    details={
+                        "item_uuid": item_uuid,
+                        "request_uuid": arguments["request_uuid"],
+                    },
                 )
+            self.logger.info(f"Removed item with UUID {item_uuid}")
 
-            # Update request with modified items array
-            variables = {
-                "requestUuid": arguments["request_uuid"],
-                "items": current_items,
-                "status": "modified",  # Mark as modified when items change
-                "updatedBy": "MCP",
-            }
+        elif "item_name" in arguments:
+            item_name = arguments["item_name"]
+            # Find and remove item by name (check both snake_case and camelCase)
+            current_items = [
+                item for item in current_items if item.get("item_name") != item_name
+            ]
+            if len(current_items) == original_length:
+                raise ValidationError(
+                    message=f"Item with name '{item_name}' not found in request",
+                    error_code=ErrorCode.ITEM_NOT_FOUND,
+                    details={
+                        "item_name": item_name,
+                        "request_uuid": arguments["request_uuid"],
+                    },
+                )
+            self.logger.info(f"Removed item with name {item_name}")
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "insertUpdateRequest",
-                "Mutation",
-                variables,
+        else:
+            raise ValidationError(
+                message="Must provide either item_uuid or item_name to remove an item",
+                error_code=ErrorCode.MISSING_REQUIRED_FIELD,
+                details={"required_fields": ["item_uuid", "item_name"]},
             )
 
-            request = humps.decamelize(result["insertUpdateRequest"]["request"])
+        # Update request with modified items array
+        variables = {
+            "requestUuid": arguments["request_uuid"],
+            "items": current_items,
+            "updatedBy": "MCP",
+        }
 
-            self.logger.info(
-                f"Successfully removed item from request {arguments['request_uuid']}"
-            )
-            return request
-        except Exception as e:
-            self.logger.error(f"Failed to remove item from RFQ request: {e}")
-            raise
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "insertUpdateRequest",
+            "Mutation",
+            variables,
+        )
+
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
+
+        request = humps.decamelize(result["insertUpdateRequest"]["request"])
+
+        self.logger.info(
+            f"Successfully removed item from request {arguments['request_uuid']}"
+        )
+        return request
 
     # ==================== Item Management Tools ====================
 
     # * MCP Function.
+    @handle_errors(operation_name="search items")
     def search_items(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Search items catalog.
         Maps to GraphQL: itemList query
         """
-        try:
-            variables = {
-                "pageNumber": arguments.get("page_number", 1),
-                "limit": arguments.get("limit", 50),
-                "itemType": arguments.get("item_type"),
-                "itemName": arguments.get("item_name"),
-                "uoms": arguments.get("uoms"),
-            }
+        variables = {
+            "pageNumber": arguments.get("page_number", 1),
+            "limit": arguments.get("limit", 50),
+            "itemType": arguments.get("item_type"),
+            "itemName": arguments.get("item_name"),
+            "uoms": arguments.get("uoms"),
+        }
 
-            variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None}
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "itemList",
-                "Query",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "itemList",
+            "Query",
+            variables,
+        )
 
-            return humps.decamelize(result["itemList"])
-        except Exception as e:
-            self.logger.error(f"Failed to search items: {e}")
-            raise
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
+
+        return humps.decamelize(result["itemList"])
 
     # * MCP Function.
+    @handle_errors(operation_name="get item")
     def get_item(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Get item details.
         Maps to GraphQL: item query
         """
-        try:
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "item",
-                "Query",
-                {"itemUuid": arguments["item_uuid"]},
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "item",
+            "Query",
+            {"itemUuid": arguments["item_uuid"]},
+        )
 
-            return humps.decamelize(result["item"])
-        except Exception as e:
-            self.logger.error(f"Failed to get item: {e}")
-            raise
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
+
+        return humps.decamelize(result["item"])
 
     # * MCP Function.
+    @handle_errors(operation_name="get provider items")
     def get_provider_items(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Search provider inventory.
         Maps to GraphQL: providerItemList query
         """
-        try:
-            variables = {
-                "pageNumber": arguments.get("page_number", 1),
-                "limit": arguments.get("limit", 50),
-                "itemUuid": arguments.get("item_uuid"),
-                "providerCorpExternalId": arguments.get("provider_corp_external_id"),
-                "minBasePricePerUom": arguments.get("min_base_price_per_uom"),
-                "maxBasePricePerUom": arguments.get("max_base_price_per_uom"),
-            }
+        variables = {
+            "pageNumber": arguments.get("page_number", 1),
+            "limit": arguments.get("limit", 50),
+            "itemUuid": arguments.get("item_uuid"),
+            "providerCorpExternalId": arguments.get("provider_corp_external_id"),
+            "minBasePricePerUom": arguments.get("min_base_price_per_uom"),
+            "maxBasePricePerUom": arguments.get("max_base_price_per_uom"),
+        }
 
-            variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None}
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "providerItemList",
-                "Query",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "providerItemList",
+            "Query",
+            variables,
+        )
 
-            return humps.decamelize(result["providerItemList"])
-        except Exception as e:
-            self.logger.error(f"Failed to get provider items: {e}")
-            raise
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
+
+        return humps.decamelize(result["providerItemList"])
 
     # * MCP Function.
+    @handle_errors(operation_name="get provider item batches")
     def get_provider_item_batches(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Get batch information for provider items.
@@ -1519,71 +1584,74 @@ class MCPRfqProcessor:
         - guardrail_price_per_uom: Minimum acceptable price for profitability
         - Batch details: expired_at, produced_at, cost breakdown
         """
-        try:
-            variables = {
-                "pageNumber": arguments.get("page_number", 1),
-                "limit": arguments.get("limit", 50),
-                "providerItemUuid": arguments.get("provider_item_uuid"),
-                "batchNumber": arguments.get("batch_number"),
-            }
+        variables = {
+            "pageNumber": arguments.get("page_number", 1),
+            "limit": arguments.get("limit", 50),
+            "providerItemUuid": arguments.get("provider_item_uuid"),
+            "batchNumber": arguments.get("batch_number"),
+        }
 
-            variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None}
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "providerItemBatchList",
-                "Query",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "providerItemBatchList",
+            "Query",
+            variables,
+        )
 
-            return humps.decamelize(result["providerItemBatchList"])
-        except Exception as e:
-            self.logger.error(f"Failed to get provider item batches: {e}")
-            raise
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
+
+        return humps.decamelize(result["providerItemBatchList"])
 
     # ==================== Quote Management Tools ====================
 
     # * MCP Function.
+    @handle_errors(operation_name="create quote")
     def create_quote(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Create new quote for RFQ request.
         Maps to GraphQL: insertUpdateQuote mutation
 
-        Note: After creation, quote items cannot be added/deleted.
-        To change items, use add_item_to_rfq_request or remove_item_from_rfq_request
-        on the request and create a new quote.
+        Note:
+        - 'rounds' (negotiation rounds) is auto-calculated by backend based on existing quotes from the same provider
+        - shipping_method and shipping_amount cannot be set during creation, use update_quote instead
+        - After creation, quote items can be managed using add_quote_item, update_quote_item, and remove_quote_item
         """
-        try:
-            self.logger.info(f"Creating quote: {arguments}")
+        self.logger.info(f"Creating quote: {arguments}")
 
-            variables = {
-                "requestUuid": arguments["request_uuid"],
-                "providerCorpExternalId": arguments["provider_corp_external_id"],
-                "salesRepEmail": arguments.get("sales_rep_email"),
-                "status": arguments.get("status", "draft"),
-                "notes": arguments.get("notes", ""),
-                "updatedBy": "MCP",
-            }
+        variables = {
+            "requestUuid": arguments["request_uuid"],
+            "providerCorpExternalId": arguments["provider_corp_external_id"],
+            "salesRepEmail": arguments.get("sales_rep_email"),
+            "status": arguments.get("status", "draft"),
+            "notes": arguments.get("notes", ""),
+            "updatedBy": "MCP",
+        }
 
-            # Remove None values to only send provided fields
-            # Note: 'rounds' is auto-calculated by backend, not sent on creation
-            variables = {k: v for k, v in variables.items() if v is not None}
+        # Remove None values to only send provided fields
+        # Note: 'rounds' is auto-calculated, shipping_method/shipping_amount not allowed on creation
+        variables = {k: v for k, v in variables.items() if v is not None}
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "insertUpdateQuote",
-                "Mutation",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "insertUpdateQuote",
+            "Mutation",
+            variables,
+        )
 
-            quote = humps.decamelize(result["insertUpdateQuote"]["quote"])
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
 
-            return quote
-        except Exception as e:
-            self.logger.error(f"Failed to create quote: {e}")
-            raise
+        quote = humps.decamelize(result["insertUpdateQuote"]["quote"])
+
+        return quote
 
     # * MCP Function.
+    @handle_errors(operation_name="update quote")
     def update_quote(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Update quote metadata (shipping, status, notes).
@@ -1594,41 +1662,42 @@ class MCPRfqProcessor:
         - status
         - notes
 
-        Note: negotiation_rounds (rounds) are auto-calculated by the backend.
+        Note: 'rounds' (negotiation rounds) are auto-calculated by the backend based on existing quotes from the same provider.
         Cannot modify quote items - use update_quote_item, add_quote_item, or remove_quote_item instead
         """
-        try:
-            self.logger.info(f"Updating quote: {arguments}")
+        self.logger.info(f"Updating quote: {arguments}")
 
-            variables = {
-                "requestUuid": arguments["request_uuid"],
-                "quoteUuid": arguments["quote_uuid"],
-                "shippingMethod": arguments.get("shipping_method"),
-                "shippingAmount": arguments.get("shipping_amount"),
-                "status": arguments.get("status"),
-                "notes": arguments.get("notes"),
-                "updatedBy": "MCP",
-            }
+        variables = {
+            "requestUuid": arguments["request_uuid"],
+            "quoteUuid": arguments["quote_uuid"],
+            "shippingMethod": arguments.get("shipping_method"),
+            "shippingAmount": arguments.get("shipping_amount"),
+            "status": arguments.get("status"),
+            "notes": arguments.get("notes"),
+            "updatedBy": "MCP",
+        }
 
-            # Remove None values to only update provided fields
-            # Note: 'rounds' is auto-calculated by backend, not sent in updates
-            variables = {k: v for k, v in variables.items() if v is not None}
+        # Remove None values to only update provided fields
+        # Note: 'rounds' is auto-calculated by backend, not sent in updates
+        variables = {k: v for k, v in variables.items() if v is not None}
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "insertUpdateQuote",
-                "Mutation",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "insertUpdateQuote",
+            "Mutation",
+            variables,
+        )
 
-            quote = humps.decamelize(result["insertUpdateQuote"]["quote"])
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
 
-            return quote
-        except Exception as e:
-            self.logger.error(f"Failed to update quote: {e}")
-            raise
+        quote = humps.decamelize(result["insertUpdateQuote"]["quote"])
+
+        return quote
 
     # * MCP Function.
+    @handle_errors(operation_name="update quote item")
     def update_quote_item(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Update a specific quote item (quantity, discount, etc.).
@@ -1641,41 +1710,42 @@ class MCPRfqProcessor:
         - slow_move_item: Boolean flag indicating if item is from slow-moving inventory
         - guardrail_price_per_uom: Minimum acceptable price for profitability
         """
-        try:
-            self.logger.info(f"Updating quote item: {arguments}")
+        self.logger.info(f"Updating quote item: {arguments}")
 
-            variables = {
-                "quoteUuid": arguments["quote_uuid"],
-                "quoteItemUuid": arguments.get("quote_item_uuid"),
-                "providerItemUuid": arguments.get("provider_item_uuid"),
-                "itemUuid": arguments.get("item_uuid"),
-                "segmentUuid": arguments.get("segment_uuid"),
-                "batchNo": arguments.get("batch_no"),
-                "requestUuid": arguments.get("request_uuid"),
-                "requestData": arguments.get("request_data"),
-                "qty": arguments.get("qty"),
-                "subtotalDiscount": arguments.get("discount_amount", 0.0),
-                "updatedBy": "MCP",
-            }
+        variables = {
+            "quoteUuid": arguments["quote_uuid"],
+            "quoteItemUuid": arguments.get("quote_item_uuid"),
+            "providerItemUuid": arguments.get("provider_item_uuid"),
+            "itemUuid": arguments.get("item_uuid"),
+            "segmentUuid": arguments.get("segment_uuid"),
+            "batchNo": arguments.get("batch_no"),
+            "requestUuid": arguments.get("request_uuid"),
+            "requestData": arguments.get("request_data"),
+            "qty": arguments.get("qty"),
+            "subtotalDiscount": arguments.get("discount_amount", 0.0),
+            "updatedBy": "MCP",
+        }
 
-            # Remove None values
-            variables = {k: v for k, v in variables.items() if v is not None}
+        # Remove None values
+        variables = {k: v for k, v in variables.items() if v is not None}
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "insertUpdateQuoteItem",
-                "Mutation",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "insertUpdateQuoteItem",
+            "Mutation",
+            variables,
+        )
 
-            quote_item = humps.decamelize(result["insertUpdateQuoteItem"]["quoteItem"])
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
 
-            return quote_item
-        except Exception as e:
-            self.logger.error(f"Failed to update quote item: {e}")
-            raise
+        quote_item = humps.decamelize(result["insertUpdateQuoteItem"]["quoteItem"])
+
+        return quote_item
 
     # * MCP Function.
+    @handle_errors(operation_name="add quote item")
     def add_quote_item(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Add a quote item to an existing quote.
@@ -1696,42 +1766,43 @@ class MCPRfqProcessor:
             - slow_move_item: Boolean flag (true if batch has slow-moving inventory)
             - guardrail_price_per_uom: Minimum acceptable price
         """
-        try:
-            self.logger.info(f"Adding quote item: {arguments}")
+        self.logger.info(f"Adding quote item: {arguments}")
 
-            variables = {
-                "quoteUuid": arguments["quote_uuid"],
-                "providerItemUuid": arguments["provider_item_uuid"],
-                "itemUuid": arguments["item_uuid"],
-                "qty": arguments["qty"],
-                "segmentUuid": arguments.get("segment_uuid"),
-                "batchNo": arguments.get("batch_no"),
-                "requestData": arguments.get("request_data"),
-                "subtotalDiscount": arguments.get("discount_amount", 0.0),
-                "updatedBy": "MCP",
-            }
+        variables = {
+            "quoteUuid": arguments["quote_uuid"],
+            "providerItemUuid": arguments["provider_item_uuid"],
+            "itemUuid": arguments["item_uuid"],
+            "qty": arguments["qty"],
+            "segmentUuid": arguments.get("segment_uuid"),
+            "batchNo": arguments.get("batch_no"),
+            "requestData": arguments.get("request_data"),
+            "subtotalDiscount": arguments.get("discount_amount", 0.0),
+            "updatedBy": "MCP",
+        }
 
-            # Remove None values
-            variables = {k: v for k, v in variables.items() if v is not None}
+        # Remove None values
+        variables = {k: v for k, v in variables.items() if v is not None}
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "insertUpdateQuoteItem",
-                "Mutation",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "insertUpdateQuoteItem",
+            "Mutation",
+            variables,
+        )
 
-            quote_item = humps.decamelize(result["insertUpdateQuoteItem"]["quoteItem"])
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
 
-            self.logger.info(
-                f"Successfully added quote item to quote {arguments['quote_uuid']}"
-            )
-            return quote_item
-        except Exception as e:
-            self.logger.error(f"Failed to add quote item: {e}")
-            raise
+        quote_item = humps.decamelize(result["insertUpdateQuoteItem"]["quoteItem"])
+
+        self.logger.info(
+            f"Successfully added quote item to quote {arguments['quote_uuid']}"
+        )
+        return quote_item
 
     # * MCP Function.
+    @handle_errors(operation_name="remove quote item")
     def remove_quote_item(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Remove a quote item from an existing quote.
@@ -1744,33 +1815,34 @@ class MCPRfqProcessor:
         Returns:
             Success message with deleted quote item UUID
         """
-        try:
-            self.logger.info(f"Removing quote item: {arguments}")
+        self.logger.info(f"Removing quote item: {arguments}")
 
-            variables = {
-                "quoteUuid": arguments["quote_uuid"],
-                "quoteItemUuid": arguments["quote_item_uuid"],
-                "updatedBy": "MCP",
-            }
+        variables = {
+            "quoteUuid": arguments["quote_uuid"],
+            "quoteItemUuid": arguments["quote_item_uuid"],
+            "updatedBy": "MCP",
+        }
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "deleteQuoteItem",
-                "Mutation",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "deleteQuoteItem",
+            "Mutation",
+            variables,
+        )
 
-            response = humps.decamelize(result.get("deleteQuoteItem", {}))
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
 
-            self.logger.info(
-                f"Successfully removed quote item {arguments['quote_item_uuid']} from quote {arguments['quote_uuid']}"
-            )
-            return response
-        except Exception as e:
-            self.logger.error(f"Failed to remove quote item: {e}")
-            raise
+        response = humps.decamelize(result.get("deleteQuoteItem", {}))
+
+        self.logger.info(
+            f"Successfully removed quote item {arguments['quote_item_uuid']} from quote {arguments['quote_uuid']}"
+        )
+        return response
 
     # * MCP Function.
+    @handle_errors(operation_name="get quote")
     def get_quote(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Retrieve quote details.
@@ -1778,391 +1850,398 @@ class MCPRfqProcessor:
 
         Response includes:
         - quote_items: Array of quote items with slow_move_item flags and guardrail pricing
-        - rounds: Number of negotiation rounds (auto-calculated)
+        - rounds: Negotiation round number (auto-calculated based on provider's quote history for this request)
         """
-        try:
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "quote",
-                "Query",
-                {"quoteUuid": arguments["quote_uuid"]},
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "quote",
+            "Query",
+            {"quoteUuid": arguments["quote_uuid"]},
+        )
 
-            return humps.decamelize(result["quote"])
-        except Exception as e:
-            self.logger.error(f"Failed to get quote: {e}")
-            raise
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
+
+        return humps.decamelize(result["quote"])
 
     # * MCP Function.
+    @handle_errors(operation_name="search quotes")
     def search_quotes(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Search quotes with filters.
         Maps to GraphQL: quoteList query
         """
-        try:
-            variables = {
-                "pageNumber": arguments.get("page_number", 1),
-                "limit": arguments.get("limit", 20),
-                "requestUuid": arguments.get("request_uuid"),
-                "providerCorpExternalId": arguments.get("provider_corp_external_id"),
-                "statuses": arguments.get("statuses"),
-                "fromCreatedAt": arguments.get("from_created_at"),
-                "toCreatedAt": arguments.get("to_created_at"),
-            }
+        variables = {
+            "pageNumber": arguments.get("page_number", 1),
+            "limit": arguments.get("limit", 20),
+            "requestUuid": arguments.get("request_uuid"),
+            "providerCorpExternalId": arguments.get("provider_corp_external_id"),
+            "statuses": arguments.get("statuses"),
+            "fromCreatedAt": arguments.get("from_created_at"),
+            "toCreatedAt": arguments.get("to_created_at"),
+        }
 
-            variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None}
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "quoteList",
-                "Query",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "quoteList",
+            "Query",
+            variables,
+        )
 
-            return humps.decamelize(result["quoteList"])
-        except Exception as e:
-            self.logger.error(f"Failed to search quotes: {e}")
-            raise
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
+
+        return humps.decamelize(result["quoteList"])
 
     # ==================== Pricing Tools ====================
 
     # * MCP Function.
+    @handle_errors(operation_name="get item price tiers")
     def get_item_price_tiers(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Get tiered pricing for items.
         Maps to GraphQL: itemPriceTierList query
         """
-        try:
-            variables = {
-                "pageNumber": arguments.get("page_number", 1),
-                "limit": arguments.get("limit", 50),
-                "itemUuid": arguments.get("item_uuid"),
-                "segmentUuid": arguments.get("segment_uuid"),
-                "minQuantity": arguments.get("min_quantity"),
-            }
+        variables = {
+            "pageNumber": arguments.get("page_number", 1),
+            "limit": arguments.get("limit", 50),
+            "itemUuid": arguments.get("item_uuid"),
+            "segmentUuid": arguments.get("segment_uuid"),
+            "minQuantity": arguments.get("min_quantity"),
+        }
 
-            variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None}
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "itemPriceTierList",
-                "Query",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "itemPriceTierList",
+            "Query",
+            variables,
+        )
 
-            return humps.decamelize(result["itemPriceTierList"])
-        except Exception as e:
-            self.logger.error(f"Failed to get item price tiers: {e}")
-            raise
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
+
+        return humps.decamelize(result["itemPriceTierList"])
 
     # * MCP Function.
+    @handle_errors(operation_name="get discount rules")
     def get_discount_rules(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Get discount rules.
         Maps to GraphQL: discountRuleList query
         """
-        try:
-            variables = {
-                "pageNumber": arguments.get("page_number", 1),
-                "limit": arguments.get("limit", 50),
-                "itemUuid": arguments.get("item_uuid"),
-                "segmentUuid": arguments.get("segment_uuid"),
-                "validFrom": arguments.get("valid_from"),
-                "validTo": arguments.get("valid_to"),
-            }
+        variables = {
+            "pageNumber": arguments.get("page_number", 1),
+            "limit": arguments.get("limit", 50),
+            "itemUuid": arguments.get("item_uuid"),
+            "segmentUuid": arguments.get("segment_uuid"),
+            "validFrom": arguments.get("valid_from"),
+            "validTo": arguments.get("valid_to"),
+        }
 
-            variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None}
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "discountRuleList",
-                "Query",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "discountRuleList",
+            "Query",
+            variables,
+        )
 
-            return humps.decamelize(result["discountRuleList"])
-        except Exception as e:
-            self.logger.error(f"Failed to get discount rules: {e}")
-            raise
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
+
+        return humps.decamelize(result["discountRuleList"])
 
     # * MCP Function.
+    @handle_errors(operation_name="calculate quote pricing")
     def calculate_quote_pricing(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Calculate final pricing for a quote with discounts and tiers.
         This is a business logic method that combines multiple GraphQL queries.
         """
-        try:
-            self.logger.info(f"Calculating quote pricing: {arguments}")
+        self.logger.info(f"Calculating quote pricing: {arguments}")
 
-            # Get the quote details
-            quote = self.get_quote(quote_uuid=arguments["quote_uuid"])
+        # Get the quote details
+        quote = self.get_quote(quote_uuid=arguments["quote_uuid"])
 
-            # For each quote item, get applicable discounts
-            quote_items = quote.get("quote_items", [])
-            pricing_details = []
+        # Check if quote has an error and propagate if present
+        if error := propagate_error_if_present(quote):
+            return error
 
-            for item in quote_items:
-                # Get discount rules for this item
-                discount_rules = self.get_discount_rules(
-                    item_uuid=item["item_uuid"],
-                    segment_uuid=arguments.get("segment_uuid"),
-                )
+        # For each quote item, get applicable discounts
+        quote_items = quote.get("quote_items", [])
+        pricing_details = []
 
-                # Get price tiers
-                price_tiers = self.get_item_price_tiers(
-                    item_uuid=item["item_uuid"],
-                    segment_uuid=arguments.get("segment_uuid"),
-                    min_quantity=item["quantity"],
-                )
+        for item in quote_items:
+            # Get discount rules for this item
+            discount_rules = self.get_discount_rules(
+                item_uuid=item["item_uuid"],
+                segment_uuid=arguments.get("segment_uuid"),
+            )
 
-                pricing_details.append(
-                    {
-                        "quote_item_uuid": item["quote_item_uuid"],
-                        "item_uuid": item["item_uuid"],
-                        "quantity": item["quantity"],
-                        "unit_price": item["unit_price"],
-                        "applicable_discounts": discount_rules.get(
-                            "discount_rules", []
-                        ),
-                        "applicable_price_tiers": price_tiers.get(
-                            "item_price_tiers", []
-                        ),
-                        "current_total": item["total_amount"],
-                    }
-                )
+            # Get price tiers
+            price_tiers = self.get_item_price_tiers(
+                item_uuid=item["item_uuid"],
+                segment_uuid=arguments.get("segment_uuid"),
+                min_quantity=item["quantity"],
+            )
 
-            return {
-                "quote_uuid": quote["quote_uuid"],
-                "pricing_details": pricing_details,
-                "quote_total": quote["total_quote_amount"],
-            }
-        except Exception as e:
-            self.logger.error(f"Failed to calculate quote pricing: {e}")
-            raise
+            pricing_details.append(
+                {
+                    "quote_item_uuid": item["quote_item_uuid"],
+                    "item_uuid": item["item_uuid"],
+                    "quantity": item["quantity"],
+                    "unit_price": item["unit_price"],
+                    "applicable_discounts": discount_rules.get("discount_rules", []),
+                    "applicable_price_tiers": price_tiers.get("item_price_tiers", []),
+                    "current_total": item["total_amount"],
+                }
+            )
+
+        return {
+            "quote_uuid": quote["quote_uuid"],
+            "pricing_details": pricing_details,
+            "quote_total": quote["total_quote_amount"],
+        }
 
     # ==================== Installment Tools ====================
 
     # * MCP Function.
+    @handle_errors(operation_name="create installment")
     def create_installment(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Create payment installment.
         Maps to GraphQL: insertUpdateInstallment mutation
+
+        Note: installment_ratio is automatically calculated by the backend
+        based on installment_amount / quote's final_total_quote_amount.
         """
-        try:
-            self.logger.info(f"Creating installment: {arguments}")
+        self.logger.info(f"Creating installment: {arguments}")
 
-            variables = {
-                "quoteUuid": arguments["quote_uuid"],
-                "requestUuid": arguments.get("request_uuid"),
-                "priority": arguments.get("installment_number"),
-                "salesorderNo": arguments.get("salesorder_no"),
-                "scheduledDate": arguments.get("due_date"),
-                "installmentRatio": arguments.get("installment_ratio"),
-                "installmentAmount": arguments.get("amount"),
-                "status": arguments.get("status", "pending"),
-                "updatedBy": "MCP",
-            }
+        variables = {
+            "quoteUuid": arguments["quote_uuid"],
+            "requestUuid": arguments.get("request_uuid"),
+            "priority": arguments.get("installment_number"),
+            "salesorderNo": arguments.get("salesorder_no"),
+            "scheduledDate": arguments.get("due_date"),
+            "installmentAmount": arguments.get("amount"),
+            "status": arguments.get("status", "pending"),
+            "updatedBy": "MCP",
+        }
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "insertUpdateInstallment",
-                "Mutation",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "insertUpdateInstallment",
+            "Mutation",
+            variables,
+        )
 
-            installment = humps.decamelize(
-                result["insertUpdateInstallment"]["installment"]
-            )
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
 
-            return installment
-        except Exception as e:
-            self.logger.error(f"Failed to create installment: {e}")
-            raise
+        installment = humps.decamelize(result["insertUpdateInstallment"]["installment"])
+
+        return installment
 
     # * MCP Function.
+    @handle_errors(operation_name="get installments")
     def get_installments(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Get installment schedule.
         Maps to GraphQL: installmentList query
         """
-        try:
-            variables = {
-                "pageNumber": arguments.get("page_number", 1),
-                "limit": arguments.get("limit", 50),
-                "quoteUuid": arguments.get("quote_uuid"),
-                "statuses": arguments.get("statuses"),
-            }
+        variables = {
+            "pageNumber": arguments.get("page_number", 1),
+            "limit": arguments.get("limit", 50),
+            "quoteUuid": arguments.get("quote_uuid"),
+            "statuses": arguments.get("statuses"),
+        }
 
-            variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None}
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "installmentList",
-                "Query",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "installmentList",
+            "Query",
+            variables,
+        )
 
-            return humps.decamelize(result["installmentList"])
-        except Exception as e:
-            self.logger.error(f"Failed to get installments: {e}")
-            raise
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
+
+        return humps.decamelize(result["installmentList"])
 
     # ==================== File Tools ====================
 
     # * MCP Function.
+    @handle_errors(operation_name="upload RFQ file")
     def upload_rfq_file(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Upload RFQ document.
         Maps to GraphQL: insertUpdateFile mutation
         """
-        try:
-            self.logger.info(f"Uploading RFQ file: {arguments}")
+        self.logger.info(f"Uploading RFQ file: {arguments}")
 
-            variables = {
-                "requestUuid": arguments["request_uuid"],
-                "fileName": arguments["file_name"],
-                "email": arguments.get("email"),
-                "updatedBy": "MCP",
-            }
+        variables = {
+            "requestUuid": arguments["request_uuid"],
+            "fileName": arguments["file_name"],
+            "email": arguments.get("email"),
+            "updatedBy": "MCP",
+        }
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "insertUpdateFile",
-                "Mutation",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "insertUpdateFile",
+            "Mutation",
+            variables,
+        )
 
-            file_obj = humps.decamelize(result["insertUpdateFile"]["file"])
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
 
-            return file_obj
-        except Exception as e:
-            self.logger.error(f"Failed to upload RFQ file: {e}")
-            raise
+        file_obj = humps.decamelize(result["insertUpdateFile"]["file"])
+
+        return file_obj
 
     # * MCP Function.
+    @handle_errors(operation_name="get RFQ files")
     def get_rfq_files(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Get RFQ files.
         Maps to GraphQL: fileList query
         """
-        try:
-            variables = {
-                "pageNumber": arguments.get("page_number", 1),
-                "limit": arguments.get("limit", 50),
-                "requestUuid": arguments.get("request_uuid"),
-                "fileType": arguments.get("file_type"),
-            }
+        variables = {
+            "pageNumber": arguments.get("page_number", 1),
+            "limit": arguments.get("limit", 50),
+            "requestUuid": arguments.get("request_uuid"),
+            "fileType": arguments.get("file_type"),
+        }
 
-            variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None}
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "fileList",
-                "Query",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "fileList",
+            "Query",
+            variables,
+        )
 
-            return humps.decamelize(result["fileList"])
-        except Exception as e:
-            self.logger.error(f"Failed to get RFQ files: {e}")
-            raise
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
+
+        return humps.decamelize(result["fileList"])
 
     # ==================== Segment Tools ====================
 
     # * MCP Function.
+    @handle_errors(operation_name="create segment")
     def create_segment(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Create pricing segment.
         Maps to GraphQL: insertUpdateSegment mutation
         """
-        try:
-            self.logger.info(f"Creating segment: {arguments}")
+        self.logger.info(f"Creating segment: {arguments}")
 
-            variables = {
-                "segmentUuid": arguments.get("segment_uuid"),
-                "providerCorpExternalId": arguments.get("provider_corp_external_id"),
-                "segmentName": arguments["segment_name"],
-                "segmentDescription": arguments.get("segment_description", ""),
-                "updatedBy": "MCP",
-            }
+        variables = {
+            "segmentUuid": arguments.get("segment_uuid"),
+            "providerCorpExternalId": arguments.get("provider_corp_external_id"),
+            "segmentName": arguments["segment_name"],
+            "segmentDescription": arguments.get("segment_description", ""),
+            "updatedBy": "MCP",
+        }
 
-            # Remove None values
-            variables = {k: v for k, v in variables.items() if v is not None}
+        # Remove None values
+        variables = {k: v for k, v in variables.items() if v is not None}
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "insertUpdateSegment",
-                "Mutation",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "insertUpdateSegment",
+            "Mutation",
+            variables,
+        )
 
-            segment = humps.decamelize(result["insertUpdateSegment"]["segment"])
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
 
-            return segment
-        except Exception as e:
-            self.logger.error(f"Failed to create segment: {e}")
-            raise
+        segment = humps.decamelize(result["insertUpdateSegment"]["segment"])
+
+        return segment
 
     # * MCP Function.
+    @handle_errors(operation_name="add contact to segment")
     def add_contact_to_segment(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Add contact to segment.
         Maps to GraphQL: insertUpdateSegmentContact mutation
         """
-        try:
-            self.logger.info(f"Adding contact to segment: {arguments}")
+        self.logger.info(f"Adding contact to segment: {arguments}")
 
-            variables = {
-                "segmentUuid": arguments["segment_uuid"],
-                "email": arguments["contact_uuid"],
-                "contactUuid": arguments.get("contact_uuid_field"),
-                "consumerCorpExternalId": arguments.get("consumer_corp_external_id"),
-                "updatedBy": "MCP",
-            }
+        variables = {
+            "segmentUuid": arguments["segment_uuid"],
+            "email": arguments["contact_uuid"],
+            "contactUuid": arguments.get("contact_uuid_field"),
+            "consumerCorpExternalId": arguments.get("consumer_corp_external_id"),
+            "updatedBy": "MCP",
+        }
 
-            # Remove None values
-            variables = {k: v for k, v in variables.items() if v is not None}
+        # Remove None values
+        variables = {k: v for k, v in variables.items() if v is not None}
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "insertUpdateSegmentContact",
-                "Mutation",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "insertUpdateSegmentContact",
+            "Mutation",
+            variables,
+        )
 
-            segment_contact = humps.decamelize(
-                result["insertUpdateSegmentContact"]["segmentContact"]
-            )
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
 
-            return segment_contact
-        except Exception as e:
-            self.logger.error(f"Failed to add contact to segment: {e}")
-            raise
+        segment_contact = humps.decamelize(
+            result["insertUpdateSegmentContact"]["segmentContact"]
+        )
+
+        return segment_contact
 
     # * MCP Function.
+    @handle_errors(operation_name="get segment contacts")
     def get_segment_contacts(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         List segment contacts.
         Maps to GraphQL: segmentContactList query
         """
-        try:
-            variables = {
-                "pageNumber": arguments.get("page_number", 1),
-                "limit": arguments.get("limit", 50),
-                "segmentUuid": arguments.get("segment_uuid"),
-                "contactUuid": arguments.get("contact_uuid"),
-            }
+        variables = {
+            "pageNumber": arguments.get("page_number", 1),
+            "limit": arguments.get("limit", 50),
+            "segmentUuid": arguments.get("segment_uuid"),
+            "contactUuid": arguments.get("contact_uuid"),
+        }
 
-            variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None}
 
-            result = self._execute_graphql_query(
-                "ai_rfq_graphql",
-                "segmentContactList",
-                "Query",
-                variables,
-            )
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "segmentContactList",
+            "Query",
+            variables,
+        )
 
-            return humps.decamelize(result["segmentContactList"])
-        except Exception as e:
-            self.logger.error(f"Failed to get segment contacts: {e}")
-            raise
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
+
+        return humps.decamelize(result["segmentContactList"])

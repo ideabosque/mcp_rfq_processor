@@ -19,7 +19,9 @@ The MCP RFQ Processor connects AI assistants to the `ai_rfq_engine` GraphQL back
 ### What's New in v0.1.1
 
 - **Slow Move Item Tracking**: Automatically identify slow-moving inventory with `slow_move_item` flag and guardrail pricing
-- **Auto-calculated Negotiation Rounds**: Backend now automatically tracks quote rounds per provider
+- **Auto-calculated Negotiation Rounds**: Backend now automatically tracks quote `rounds` per provider (renamed from `negociation_rounds`)
+- **Auto-calculated Installment Ratio**: `installment_ratio` is now computed automatically based on `installment_amount` and quote total
+- **Simplified Quote Creation**: `shipping_method` and `shipping_amount` can only be set via `update_quote`, not during creation
 - **Simplified Request Model**: Totals now calculated at quote level for better accuracy
 - **Enhanced Quote Items**: Quote responses include embedded items array with full details
 
@@ -279,15 +281,18 @@ Get batch information for provider inventory.
 #### `create_quote`
 Generate a new quote for an RFQ request.
 
+**Note**:
+- `shipping_method` and `shipping_amount` cannot be set during creation - use `update_quote` after creation
+- `rounds` (negotiation rounds) is auto-calculated by the backend
+
 **Input:**
 ```json
 {
   "request_uuid": "request-uuid",
   "provider_corp_external_id": "PROVIDER-001",
-  "shipping_method": "standard",
-  "shipping_amount": 25.00,
-  "tax_amount": 0.00,
-  "status": "draft"
+  "sales_rep_email": "sales@provider.com",
+  "status": "draft",
+  "notes": "Initial quote"
 }
 ```
 
@@ -296,6 +301,7 @@ Generate a new quote for an RFQ request.
 {
   "quote_uuid": "generated-quote-uuid",
   "request_uuid": "request-uuid",
+  "rounds": 0,
   "total_quote_amount": 0.00,
   "status": "draft"
 }
@@ -315,21 +321,23 @@ Retrieve quote details.
 **Output:** Complete quote with line items, totals, and discount information.
 
 #### `update_quote`
-Update quote metadata (shipping, negotiation rounds, status, notes).
+Update quote metadata (shipping, status, notes).
+
+**Note**: `rounds` (negotiation rounds) is auto-calculated by the backend and cannot be manually set.
 
 **Input:**
 ```json
 {
   "request_uuid": "request-uuid",
   "quote_uuid": "quote-uuid",
+  "shipping_method": "express",
   "shipping_amount": 75.00,
-  "negotiation_rounds": 2,
   "status": "submitted",
-  "notes": "Updated pricing"
+  "notes": "Updated pricing and shipping"
 }
 ```
 
-**Output:** Updated quote object.
+**Output:** Updated quote object with auto-calculated `rounds`.
 
 #### `search_quotes`
 Search and filter quotes.
@@ -444,19 +452,21 @@ Calculate final pricing with all discounts applied.
 #### `create_installment`
 Set up a payment installment for a quote.
 
+**Note**: `installment_ratio` is auto-calculated by the backend based on `installment_amount` / `final_total_quote_amount`.
+
 **Input:**
 ```json
 {
   "quote_uuid": "quote-uuid",
-  "priority": 1,
-  "scheduled_date": "2025-12-01T00:00:00Z",
-  "installment_ratio": 0.30,
-  "status": "scheduled",
-  "notes": "30% down payment"
+  "installment_number": 1,
+  "salesorder_no": "SO-12345",
+  "due_date": "2025-12-01T00:00:00Z",
+  "amount": 3000.00,
+  "status": "pending"
 }
 ```
 
-**Output:** Installment record with calculated amount.
+**Output:** Installment record with auto-calculated `installment_ratio`.
 
 #### `get_installments`
 Retrieve installments for a quote.
@@ -576,12 +586,12 @@ provider_items = processor.get_provider_items(
     provider_corp_external_id="PROVIDER-001"
 )
 
-# 4. Create quote
+# 4. Create quote (note: shipping will be set later via update)
 quote = processor.create_quote(
     request_uuid=request_uuid,
     provider_corp_external_id="PROVIDER-001",
-    shipping_method="express",
-    shipping_amount=50.00
+    sales_rep_email="sales@provider.com",
+    status="draft"
 )
 
 # 5. Add line items to quote
@@ -590,32 +600,41 @@ quote_item = processor.add_quote_item(
     provider_item_uuid=provider_items[0]["provider_item_uuid"],
     item_uuid=items[0]["item_uuid"],
     qty=1000,
-    uom="EA",
-    price_per_uom=12.50
+    discount_amount=0.00
 )
 
-# 6. Calculate final pricing with discounts
+# 6. Update quote with shipping information
+processor.update_quote(
+    request_uuid=request_uuid,
+    quote_uuid=quote["quote_uuid"],
+    shipping_method="express",
+    shipping_amount=50.00
+)
+
+# 7. Calculate final pricing with discounts
 final_quote = processor.calculate_quote_pricing(
     quote_uuid=quote["quote_uuid"]
 )
 
-# 7. Create installment plan
+# 8. Create installment plan (installment_ratio auto-calculated)
 installment1 = processor.create_installment(
     quote_uuid=quote["quote_uuid"],
-    priority=1,
-    scheduled_date="2025-12-01T00:00:00Z",
-    installment_ratio=0.50
+    installment_number=1,
+    due_date="2025-12-01T00:00:00Z",
+    amount=5000.00,  # installment_ratio will be calculated automatically
+    status="pending"
 )
 
 installment2 = processor.create_installment(
     quote_uuid=quote["quote_uuid"],
-    priority=2,
-    scheduled_date="2026-01-01T00:00:00Z",
-    installment_ratio=0.50
+    installment_number=2,
+    due_date="2026-01-01T00:00:00Z",
+    amount=5000.00,  # installment_ratio will be calculated automatically
+    status="pending"
 )
 
-# 8. Update quote status
-processor.update_quote_status(
+# 9. Update quote status
+processor.update_quote(
     request_uuid=request_uuid,
     quote_uuid=quote["quote_uuid"],
     status="submitted"
