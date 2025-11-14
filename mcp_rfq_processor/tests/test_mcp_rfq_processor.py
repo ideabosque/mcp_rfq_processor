@@ -172,7 +172,7 @@ def pytest_collection_modifyitems(
 
     for item in items:
         # Extract the test function name from the full test name (before the '[' if parameterized)
-        test_func_name = item.name.split('[')[0].lower()
+        test_func_name = item.name.split("[")[0].lower()
 
         # Use exact match for function name to avoid matching substrings
         # e.g., "test_update_quote" won't match "test_update_quote_item"
@@ -472,8 +472,8 @@ def test_get_item_price_tiers(mcp_rfq_processor, test_data):
     for field in optional_fields:
         if test_data.get(field) is not None:
             # Convert camelCase to snake_case for Python function
-            snake_case_field = field[0].lower() + ''.join(
-                ['_' + c.lower() if c.isupper() else c for c in field[1:]]
+            snake_case_field = field[0].lower() + "".join(
+                ["_" + c.lower() if c.isupper() else c for c in field[1:]]
             )
             arguments[snake_case_field] = test_data.get(field)
 
@@ -490,14 +490,18 @@ def test_get_item_price_tiers(mcp_rfq_processor, test_data):
 
     # Verify response structure
     if "item_price_tier_list" in result or "itemPriceTierList" in result:
-        price_tiers = result.get("item_price_tier_list") or result.get("itemPriceTierList")
+        price_tiers = result.get("item_price_tier_list") or result.get(
+            "itemPriceTierList"
+        )
         if price_tiers and len(price_tiers) > 0:
             # Check that first tier has expected fields
             tier = price_tiers[0]
             assert "item_price_tier_uuid" in tier or "itemPriceTierUuid" in tier
             # Verify status is active
             assert tier.get("status") == "active"
-            logger.info(f"Found {len(price_tiers)} active price tier(s) with filters: {arguments}")
+            logger.info(
+                f"Found {len(price_tiers)} active price tier(s) with filters: {arguments}"
+            )
 
 
 @pytest.mark.integration
@@ -512,18 +516,13 @@ def test_get_discount_rules(mcp_rfq_processor, test_data):
     }
 
     # Add optional filters
-    optional_fields = [
-        "itemUuid", "providerItemUuid", "segmentUuid",
-        "maxSubtotalGreaterThan", "minSubtotalGreaterThan",
-        "maxSubtotalLessThan", "minSubtotalLessThan",
-        "maxDiscountPercentage", "minDiscountPercentage"
-    ]
+    optional_fields = ["itemUuid", "providerItemUuid", "segmentUuid"]
 
     for field in optional_fields:
         if test_data.get(field) is not None:
             # Convert camelCase to snake_case for Python function
-            snake_case_field = field[0].lower() + ''.join(
-                ['_' + c.lower() if c.isupper() else c for c in field[1:]]
+            snake_case_field = field[0].lower() + "".join(
+                ["_" + c.lower() if c.isupper() else c for c in field[1:]]
             )
             arguments[snake_case_field] = test_data.get(field)
 
@@ -540,7 +539,9 @@ def test_get_discount_rules(mcp_rfq_processor, test_data):
 
     # Verify response structure
     if "discount_rule_list" in result or "discountRuleList" in result:
-        discount_rules = result.get("discount_rule_list") or result.get("discountRuleList")
+        discount_rules = result.get("discount_rule_list") or result.get(
+            "discountRuleList"
+        )
         if discount_rules and len(discount_rules) > 0:
             # Check that first rule has expected fields
             rule = discount_rules[0]
@@ -552,7 +553,9 @@ def test_get_discount_rules(mcp_rfq_processor, test_data):
             if "max_discount_percentage" in rule or "maxDiscountPercentage" in rule:
                 logger.info(f"Discount rule has max_discount_percentage limit")
 
-            logger.info(f"Found {len(discount_rules)} discount rule(s) with filters: {arguments}")
+            logger.info(
+                f"Found {len(discount_rules)} discount rule(s) with filters: {arguments}"
+            )
 
 
 # ============================================================================
