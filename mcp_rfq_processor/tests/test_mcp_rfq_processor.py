@@ -139,7 +139,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action="store",
         default=os.getenv(_TEST_FUNCTION_ENV, "").strip(),
         help=(
-            "Run only tests whose name contains this substring. "
+            "Run only tests whose name exactly matches this value (e.g., 'test_update_quote'). "
             f"Defaults to the {_TEST_FUNCTION_ENV} environment variable when set."
         ),
     )
@@ -171,7 +171,12 @@ def pytest_collection_modifyitems(
     deselected: list[pytest.Item] = []
 
     for item in items:
-        name_match = not target_lower or target_lower in item.name.lower()
+        # Extract the test function name from the full test name (before the '[' if parameterized)
+        test_func_name = item.name.split('[')[0].lower()
+
+        # Use exact match for function name to avoid matching substrings
+        # e.g., "test_update_quote" won't match "test_update_quote_item"
+        name_match = not target_lower or test_func_name == target_lower
         marker_match = not markers or any(item.get_closest_marker(m) for m in markers)
 
         if name_match and marker_match:
@@ -1096,7 +1101,10 @@ def test_get_quote(mcp_rfq_processor, test_data):
     result, error = _call_method(
         mcp_rfq_processor,
         "get_quote",
-        {"quote_uuid": test_data.get("quoteUuid")},
+        {
+            "quote_uuid": test_data.get("quoteUuid"),
+            "request_uuid": test_data.get("requestUuid"),
+        },
         "get_quote",
     )
 
@@ -1116,6 +1124,8 @@ def test_update_quote(mcp_rfq_processor, test_data):
         {
             "request_uuid": test_data.get("requestUuid"),
             "quote_uuid": test_data.get("quoteUuid"),
+            "shipping_method": test_data.get("shippingMethod"),
+            "shipping_amount": test_data.get("shippingAmount"),
             "status": "submitted",
         },
         "update_quote",

@@ -10,7 +10,6 @@ from typing import Any, Dict
 
 import boto3
 import humps
-
 from silvaengine_utility import Utility
 
 # Import centralized error handling utilities
@@ -476,6 +475,10 @@ MCP_CONFIGURATION = {
                     "quote_uuid": {
                         "type": "string",
                         "description": "UUID of the quote to retrieve",
+                    },
+                    "request_uuid": {
+                        "type": "string",
+                        "description": "UUID of the request (optional, may be required by some GraphQL schemas)",
                     }
                 },
                 "required": ["quote_uuid"],
@@ -1975,7 +1978,7 @@ class MCPRfqProcessor:
         # Create quote items from request items that have provider_items assigned
         request_items = request.get("items", [])
         provider_corp_external_id = arguments["provider_corp_external_id"]
-        
+
         if request_items:
             self.logger.info(
                 f"Creating quote items from {len(request_items)} request items for provider {provider_corp_external_id}"
@@ -1990,13 +1993,13 @@ class MCPRfqProcessor:
                         pi for pi in provider_items
                         if pi.get("provider_corp_external_id") == provider_corp_external_id
                     ]
-                    
+
                     if not matching_provider_items:
                         self.logger.info(
                             f"Skipping request item {req_item.get('item_uuid')} - no provider_items for provider {provider_corp_external_id}"
                         )
                         continue
-                    
+
                     # Create a quote item for each matching provider_item
                     for provider_item in matching_provider_items:
                         quote_item_args = {
@@ -2012,7 +2015,7 @@ class MCPRfqProcessor:
 
                         # Use the private method to add quote item
                         quote_item_result = self._add_quote_item(**quote_item_args)
-                        
+
                         # Check if there was an error creating the quote item
                         if error := propagate_error_if_present(quote_item_result):
                             self.logger.error(
@@ -2020,7 +2023,7 @@ class MCPRfqProcessor:
                             )
                             # Continue creating other quote items even if one fails
                             continue
-                        
+
                         self.logger.info(
                             f"Created quote item for provider_item {provider_item.get('provider_item_uuid')}"
                         )
@@ -2237,11 +2240,19 @@ class MCPRfqProcessor:
         - quote_items: Array of quote items with slow_move_item flags and guardrail pricing
         - rounds: Negotiation round number (auto-calculated based on provider's quote history for this request)
         """
+        variables = {
+            "quoteUuid": arguments["quote_uuid"],
+        }
+
+        # Add requestUuid if provided (may be required by GraphQL schema)
+        if "request_uuid" in arguments:
+            variables["requestUuid"] = arguments["request_uuid"]
+
         result = self._execute_graphql_query(
             "ai_rfq_graphql",
             "quote",
             "Query",
-            {"quoteUuid": arguments["quote_uuid"]},
+            variables,
         )
 
         # Check for error in response and propagate if present
