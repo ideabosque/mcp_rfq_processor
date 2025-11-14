@@ -14,18 +14,26 @@ The MCP RFQ Processor connects AI assistants to the `ai_rfq_engine` GraphQL back
 - **Segment Management**: Organize customers and providers into pricing segments
 
 **Current Version**: 0.1.1  
-**Total MCP Tools**: 29 (fully implemented and tested)
+**Total MCP Tools**: 25 (fully implemented and tested)
 
 ### What's New in v0.1.1
 
+**Major Features:**
+- **NEW: `calculate_quote_pricing` Tool**: Groups request items by provider/segment, returns pricing with applicable discount rules and price tiers for LLM-driven decision making
+- **Enhanced Pricing Filters**: `get_item_price_tiers` and `get_discount_rules` now support quantity/subtotal filtering parameters
+- **14-Step RFQ to Quote Workflow**: Comprehensive workflow guide from customer inquiry to final quote submission
+
+**Backend Integration Updates:**
 - **Slow Move Item Tracking**: Automatically identify slow-moving inventory with `slow_move_item` flag and guardrail pricing
 - **Auto-calculated Negotiation Rounds**: Backend now automatically tracks quote `rounds` per provider (renamed from `negociation_rounds`)
 - **Auto-calculated Installment Ratio**: `installment_ratio` is now computed automatically based on `installment_amount` and quote total
 - **Simplified Quote Creation**: `shipping_method` and `shipping_amount` can only be set via `update_quote`, not during creation
-- **Simplified Request Model**: Totals now calculated at quote level for better accuracy
-- **Enhanced Quote Items**: Quote responses include embedded items array with full details
 
-See [CHANGELOG.md](CHANGELOG.md) for detailed migration guide and breaking changes.
+**Streamlined Tools (27→25):**
+- **Removed**: `create_segment` and `add_contact_to_segment` (segments managed via backend admin)
+- **Kept**: `get_segment_contacts` for read-only segment lookups
+
+See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for complete workflow documentation.
 
 ## Architecture
 
@@ -106,7 +114,7 @@ processor.endpoint_id = "your-endpoint-id"
 
 ## Available MCP Tools
 
-All 27 tools are fully implemented and production-ready.
+All 25 tools are fully implemented and production-ready.
 
 ### 1. Request Management (6 tools)
 
@@ -408,42 +416,100 @@ Remove a line item from a quote.
 #### `get_item_price_tiers`
 Retrieve tiered pricing for an item.
 
+**Note**: Typically used via `calculate_quote_pricing` which automatically filters by quantity. Direct use available for LLM-driven price exploration.
+
 **Input:**
 ```json
 {
   "item_uuid": "item-uuid",
   "provider_item_uuid": "optional-provider-item-uuid",
-  "segment_uuid": "optional-segment-uuid"
+  "segment_uuid": "optional-segment-uuid",
+  "min_quantity_greater_then": "optional-int",
+  "max_quantity_greater_then": "optional-int",
+  "min_quantity_less_then": "optional-int",
+  "max_quantity_less_then": "optional-int",
+  "min_price": "optional-float",
+  "max_price": "optional-float"
 }
 ```
 
 **Output:** List of price tiers (quantity ranges and prices).
 
+**NEW in v0.1.1**: Added quantity and price filter parameters for more precise tier selection.
+
 #### `get_discount_rules`
 Get applicable discount rules.
+
+**Note**: Typically used via `calculate_quote_pricing` which automatically filters by group subtotal. Direct use available for LLM-driven discount exploration.
 
 **Input:**
 ```json
 {
   "item_uuid": "item-uuid",
   "provider_item_uuid": "optional-provider-item-uuid",
-  "segment_uuid": "optional-segment-uuid"
+  "segment_uuid": "optional-segment-uuid",
+  "max_subtotal_greater_than": "optional-float",
+  "min_subtotal_greater_than": "optional-float",
+  "max_subtotal_less_than": "optional-float",
+  "min_subtotal_less_than": "optional-float",
+  "max_discount_percentage": "optional-float",
+  "min_discount_percentage": "optional-float"
 }
 ```
 
 **Output:** List of discount rules with conditions and percentages.
 
+**NEW in v0.1.1**: Added subtotal and percentage filter parameters for more precise rule selection.
+
 #### `calculate_quote_pricing`
-Calculate final pricing with all discounts applied.
+**NEW in v0.1.1**: Calculate grouped pricing from request with provider_items, returning applicable discount rules and price tiers for LLM-driven decision making.
+
+**Note**: This reads from REQUEST (not quote) and groups items by (provider_corp_external_id, segment_uuid). Use this BEFORE creating quotes (Step 7 in workflow).
 
 **Input:**
 ```json
 {
-  "quote_uuid": "quote-uuid"
+  "request_uuid": "request-uuid",
+  "segment_uuid": "segment-uuid"
 }
 ```
 
-**Output:** Quote with updated totals including all applicable discounts.
+**Output:** Grouped pricing structure with discount rules and price tiers.
+
+```json
+{
+  "request_uuid": "req-uuid",
+  "segment_uuid": "seg-uuid",
+  "groups": [
+    {
+      "provider_corp_external_id": "PROVIDER-001",
+      "segment_uuid": "seg-uuid",
+      "items": [
+        {
+          "item_uuid": "item-uuid",
+          "provider_item_uuid": "prov-item-uuid",
+          "batch_no": "LOT-2025-001",
+          "qty": 500,
+          "price_per_uom": 9.50,
+          "guardrail_price_per_uom": 9.50,
+          "slow_move_item": true,
+          "subtotal": 4750.00,
+          "price_tiers": [...]
+        }
+      ],
+      "subtotal": 4750.00,
+      "discount_rules": [...]
+    }
+  ],
+  "subtotal": 4750.00
+}
+```
+
+**Key Features:**
+- Groups items by provider and segment for multi-provider comparison
+- Returns discount_rules and price_tiers WITHOUT applying them
+- LLM presents options to user and applies discounts only after confirmation
+- Includes batch-specific pricing with slow_move_item flags
 
 ---
 
@@ -515,36 +581,9 @@ Retrieve files associated with a request.
 
 ---
 
-### 7. Segment Management (3 tools)
+### 7. Segment Management (1 tool)
 
-#### `create_segment`
-Create a customer or provider segment for pricing.
-
-**Input:**
-```json
-{
-  "provider_corp_external_id": "PROVIDER-001",
-  "segment_name": "Premium Customers",
-  "segment_description": "High-volume customers with special pricing"
-}
-```
-
-**Output:** Segment record with UUID.
-
-#### `add_contact_to_segment`
-Associate a contact with a pricing segment.
-
-**Input:**
-```json
-{
-  "segment_uuid": "segment-uuid",
-  "contact_uuid": "contact-uuid",
-  "consumer_corp_external_id": "CUSTOMER-001",
-  "email": "contact@customer.com"
-}
-```
-
-**Output:** Segment contact association record.
+**Note:** Segments are typically managed through the backend admin interface. This tool provides read-only access to segment-contact associations for pricing lookups.
 
 #### `get_segment_contacts`
 List contacts in a segment.

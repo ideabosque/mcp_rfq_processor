@@ -820,59 +820,7 @@ MCP_CONFIGURATION = {
                 },
             },
         },
-        # Segment Tools (3)
-        {
-            "name": "create_segment",
-            "description": "Create pricing segment for customer grouping. Used to apply segment-specific pricing and discounts. Returns created segment details.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "segment_uuid": {
-                        "type": "string",
-                        "description": "UUID of the segment (for updates)",
-                    },
-                    "provider_corp_external_id": {
-                        "type": "string",
-                        "description": "Provider corporation external ID",
-                    },
-                    "segment_name": {
-                        "type": "string",
-                        "description": "Name of the segment",
-                    },
-                    "segment_description": {
-                        "type": "string",
-                        "description": "Description of the segment",
-                    },
-                },
-                "required": ["segment_name"],
-            },
-        },
-        {
-            "name": "add_contact_to_segment",
-            "description": "Add contact to pricing segment. Associates customer with segment for pricing rules. Returns segment contact details.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "segment_uuid": {
-                        "type": "string",
-                        "description": "UUID of the segment",
-                    },
-                    "contact_uuid": {
-                        "type": "string",
-                        "description": "Email or UUID of the contact",
-                    },
-                    "contact_uuid_field": {
-                        "type": "string",
-                        "description": "UUID field of the contact",
-                    },
-                    "consumer_corp_external_id": {
-                        "type": "string",
-                        "description": "Consumer corporation external ID",
-                    },
-                },
-                "required": ["segment_uuid", "contact_uuid"],
-            },
-        },
+        # Segment Tools (1)
         {
             "name": "get_segment_contacts",
             "description": "List contacts in a pricing segment. Returns paginated list of segment contacts.",
@@ -1099,22 +1047,6 @@ MCP_CONFIGURATION = {
             "return_type": "text",
         },
         # Segment Tools
-        {
-            "type": "tool",
-            "name": "create_segment",
-            "module_name": "mcp_rfq_processor",
-            "class_name": "MCPRfqProcessor",
-            "function_name": "create_segment",
-            "return_type": "text",
-        },
-        {
-            "type": "tool",
-            "name": "add_contact_to_segment",
-            "module_name": "mcp_rfq_processor",
-            "class_name": "MCPRfqProcessor",
-            "function_name": "add_contact_to_segment",
-            "return_type": "text",
-        },
         {
             "type": "tool",
             "name": "get_segment_contacts",
@@ -2843,78 +2775,6 @@ class MCPRfqProcessor:
         return humps.decamelize(result["fileList"])
 
     # ==================== Segment Tools ====================
-
-    # * MCP Function.
-    @handle_errors(operation_name="create segment")
-    def create_segment(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Create pricing segment.
-        Maps to GraphQL: insertUpdateSegment mutation
-        """
-        self.logger.info(f"Creating segment: {arguments}")
-
-        variables = {
-            "segmentUuid": arguments.get("segment_uuid"),
-            "providerCorpExternalId": arguments.get("provider_corp_external_id"),
-            "segmentName": arguments["segment_name"],
-            "segmentDescription": arguments.get("segment_description", ""),
-            "updatedBy": "MCP",
-        }
-
-        # Remove None values
-        variables = {k: v for k, v in variables.items() if v is not None}
-
-        result = self._execute_graphql_query(
-            "ai_rfq_graphql",
-            "insertUpdateSegment",
-            "Mutation",
-            variables,
-        )
-
-        # Check for error in response and propagate if present
-        if error := propagate_error_if_present(result):
-            return error
-
-        segment = humps.decamelize(result["insertUpdateSegment"]["segment"])
-
-        return segment
-
-    # * MCP Function.
-    @handle_errors(operation_name="add contact to segment")
-    def add_contact_to_segment(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Add contact to segment.
-        Maps to GraphQL: insertUpdateSegmentContact mutation
-        """
-        self.logger.info(f"Adding contact to segment: {arguments}")
-
-        variables = {
-            "segmentUuid": arguments["segment_uuid"],
-            "email": arguments["contact_uuid"],
-            "contactUuid": arguments.get("contact_uuid_field"),
-            "consumerCorpExternalId": arguments.get("consumer_corp_external_id"),
-            "updatedBy": "MCP",
-        }
-
-        # Remove None values
-        variables = {k: v for k, v in variables.items() if v is not None}
-
-        result = self._execute_graphql_query(
-            "ai_rfq_graphql",
-            "insertUpdateSegmentContact",
-            "Mutation",
-            variables,
-        )
-
-        # Check for error in response and propagate if present
-        if error := propagate_error_if_present(result):
-            return error
-
-        segment_contact = humps.decamelize(
-            result["insertUpdateSegmentContact"]["segmentContact"]
-        )
-
-        return segment_contact
 
     # * MCP Function.
     @handle_errors(operation_name="get segment contacts")

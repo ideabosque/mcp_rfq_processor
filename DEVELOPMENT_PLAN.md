@@ -12,7 +12,7 @@ This document outlines the complete development plan for integrating the `ai_rfq
 
 ### Implementation Summary
 
-- **Total MCP Tools**: 27 (implemented)
+- **Total MCP Tools**: 25 (implemented)
 - **Test Coverage**: Comprehensive test suite with 1008 lines
 - **GraphQL Integration**: Fully functional with schema caching
 - **Documentation**: Complete with README, API Reference, and this development plan
@@ -198,7 +198,7 @@ python_files = "test_*.py"
 ### 2.1 MCP Configuration Structure
 **Priority**: Critical
 **Estimated Time**: 4 hours
-**Status**: ✅ COMPLETED - 27 tools implemented
+**Status**: ✅ COMPLETED - 25 tools implemented
 
 Implementation in `mcp_rfq_processor.py`:
 
@@ -338,17 +338,7 @@ MCP_CONFIGURATION = {
             "inputSchema": {...}
         },
         
-        # Segment Tools (3) ✅ IMPLEMENTED
-        {
-            "name": "create_segment",
-            "description": "Create pricing segment...",
-            "inputSchema": {...}
-        },
-        {
-            "name": "add_contact_to_segment",
-            "description": "Add contact to segment...",
-            "inputSchema": {...}
-        },
+        # Segment Tools (1) ✅ IMPLEMENTED (read-only)
         {
             "name": "get_segment_contacts",
             "description": "List segment contacts...",
@@ -385,7 +375,7 @@ MCP_CONFIGURATION = {
 ```
 
 **Tasks**:
-- [x] Define all 27 MCP tools with complete inputSchema
+- [x] Define all 25 MCP tools with complete inputSchema
 - [x] Create module_links mapping
 - [x] Define module settings
 
@@ -860,18 +850,15 @@ def update_quote_item_discount(self, **arguments: Dict[str, Any]) -> Dict[str, A
 ### 4.4 Segment Management
 **Priority**: Low (Phase 3)
 **Estimated Time**: 4 hours
-**Status**: ✅ COMPLETED - 3 tools implemented
+**Status**: ✅ COMPLETED - 1 tool implemented (read-only)
 
 **Tools implemented**:
-- `create_segment` - Mutation insertUpdateSegment
-- `add_contact_to_segment` - Mutation insertUpdateSegmentContact
-- `get_segment_contacts` - Query segmentContactList
+- `get_segment_contacts` - Query segmentContactList (read-only)
 
 **Tasks**:
-- [x] Implement create_segment
-- [x] Implement add_contact_to_segment
 - [x] Implement get_segment_contacts
 - [x] Write segment management tests
+- [x] Removed create_segment and add_contact_to_segment (managed via backend admin)
 
 ---
 
@@ -889,7 +876,7 @@ def update_quote_item_discount(self, **arguments: Dict[str, Any]) -> Dict[str, A
 - Pricing (3 tools) ✅
 - Installments (2 tools) ✅
 - Files (2 tools) ✅
-- Segments (3 tools) ✅
+- Segments (1 tool - read-only) ✅
 
 **Mock Strategy**:
 ```python
@@ -1025,7 +1012,7 @@ All phases were successfully completed ahead of schedule with enhanced features:
 - Documentation framework created
 
 **Phase 2: MCP Tool Definitions** ✅
-- 27 MCP tools defined (5 more than originally planned)
+- 25 MCP tools defined
 - Complete inputSchema for all tools
 - Module links configured
 
@@ -1038,11 +1025,11 @@ All phases were successfully completed ahead of schedule with enhanced features:
 - Pricing & Discounts: 3 tools
 - Installment Management: 2 tools
 - Document Management: 2 tools
-- Segment Management: 3 tools
+- Segment Management: 1 tool (read-only get_segment_contacts)
 
 **Phase 5: Testing** ✅
 - Comprehensive unit tests: 1008 lines
-- Test coverage for all 27 tools
+- Test coverage for all 25 tools
 - Error scenario testing
 
 **Phase 6: Documentation** ✅
@@ -1059,7 +1046,8 @@ All phases were successfully completed ahead of schedule with enhanced features:
 - Final implementation is MORE FLEXIBLE than originally planned
 - Kept direct quote item operations (add/update/remove) for better usability
 - Added convenience methods for request item operations
-- Total: 27 tools (vs originally planned 22-24)
+- Removed segment write operations (create_segment, add_contact_to_segment) - managed via backend admin
+- Total: 25 tools (streamlined for RFQ workflow focus)
 
 ---
 
@@ -1367,7 +1355,7 @@ Scenario: Apply discounts to quote items
 ## Success Criteria - ✅ ALL ACHIEVED
 
 ### Functional Requirements
-- ✅ All 27 MCP tools implemented (MORE than originally planned!)
+- ✅ All 25 MCP tools implemented (streamlined for RFQ workflow focus)
 - ✅ GraphQL integration working with schema caching
 - ✅ Complete RFQ workflow functional
 - ✅ Error handling robust with detailed logging
@@ -1438,7 +1426,7 @@ Scenario: Apply discounts to quote items
 |------|---------|---------|--------|
 | 2025-11-05 | 0.1.0 | Initial development plan | Development Team |
 | 2025-11-06 | 0.2.0 | Updated based on business requirements:<br>- Added `update_rfq_request` tool<br>- Removed `add_quote_item`, `update_quote_item`, `delete_quote_item` tools<br>- Added `update_quote` tool (replaces `update_quote_status`)<br>- Added `update_quote_item_discount` tool<br>- Documented new workflows for item modification<br>- Total tools: 22 (was 24) | Development Team |
-| 2025-11-10 | 1.0.0 | **PROJECT COMPLETED**:<br>- All 27 MCP tools fully implemented<br>- Kept flexible quote item operations (add/update/remove)<br>- Added convenience methods for request items<br>- Comprehensive test suite (1008 lines)<br>- Complete documentation (README, API Reference, Dev Plan)<br>- Updated all docs to reflect actual implementation<br>- Total tools: 27 (MORE than planned) | Development Team |
+| 2025-11-10 | 1.0.0 | **PROJECT COMPLETED**:<br>- All 25 MCP tools fully implemented<br>- Kept flexible quote item operations (add/update/remove)<br>- Added convenience methods for request items<br>- Comprehensive test suite (1008 lines)<br>- Complete documentation (README, API Reference, Dev Plan)<br>- Streamlined segment management (read-only)<br>- Total tools: 25 (focused on RFQ workflow) | Development Team |
 
 ---
 
@@ -1459,11 +1447,11 @@ Scenario: Apply discounts to quote items
 4. Pricing (3): get_price_tiers, get_discount_rules, calculate_pricing
 5. Installments (2): create, get
 6. Files (2): upload, get
-7. Segments (3): create, add_contact, get_contacts
+7. Segments (1): get_contacts (read-only)
 
 **Testing:**
 - 1008 lines of comprehensive unit tests
-- Coverage for all 27 tools
+- Coverage for all 25 tools
 - Mock strategies for GraphQL integration
 
 **Documentation:**
@@ -1473,12 +1461,12 @@ Scenario: Apply discounts to quote items
 
 ### 🎯 Key Achievements
 
-1. **Exceeded Scope**: Implemented 27 tools vs originally planned 22-24
+1. **Streamlined Focus**: 25 tools focused on RFQ workflow (removed segment write operations)
 2. **Enhanced Flexibility**: Kept direct quote item operations for better UX
 3. **Added Conveniences**: Request item add/remove helper methods
 4. **Comprehensive Testing**: 1008 lines of test coverage
 5. **Complete Documentation**: All docs updated and production-ready
-6. **Production Ready**: Version 0.1.0 ready for deployment
+6. **Production Ready**: Version 0.1.1 ready for deployment
 
 ### 📋 Recommendations for Future Enhancements
 
@@ -1491,4 +1479,4 @@ Scenario: Apply discounts to quote items
 
 ### 🚀 Ready for Production
 
-The MCP RFQ Processor is fully implemented, tested, and documented. All 27 tools are production-ready and can be deployed immediately.
+The MCP RFQ Processor is fully implemented, tested, and documented. All 25 tools are production-ready and can be deployed immediately.

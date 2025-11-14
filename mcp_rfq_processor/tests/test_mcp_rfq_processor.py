@@ -270,8 +270,6 @@ _TEST_DATA = _load_test_data()
 ITEM_TEST_DATA = _TEST_DATA.get("item_test_data", [])
 ITEM_GET_TEST_DATA = _TEST_DATA.get("item_get_test_data", [])
 ITEM_LIST_TEST_DATA = _TEST_DATA.get("item_list_test_data", [])
-SEGMENT_TEST_DATA = _TEST_DATA.get("segment_test_data", [])
-SEGMENT_GET_TEST_DATA = _TEST_DATA.get("segment_get_test_data", [])
 SEGMENT_LIST_TEST_DATA = _TEST_DATA.get("segment_list_test_data", [])
 PROVIDER_ITEM_TEST_DATA = _TEST_DATA.get("provider_item_test_data", [])
 PROVIDER_ITEM_GET_TEST_DATA = _TEST_DATA.get("provider_item_get_test_data", [])
@@ -318,46 +316,6 @@ def mcp_rfq_processor():
 # ============================================================================
 # SEGMENT MANAGEMENT TESTS
 # ============================================================================
-
-
-@pytest.mark.integration
-@pytest.mark.parametrize("test_data", SEGMENT_TEST_DATA)
-@log_test_result
-def test_create_segment(mcp_rfq_processor, test_data):
-    """Test creating segment."""
-    result, error = _call_method(
-        mcp_rfq_processor,
-        "create_segment",
-        {
-            "segment_name": test_data.get("segmentName"),
-            "segment_description": test_data.get("segmentDescription", ""),
-        },
-        "create_segment",
-    )
-
-    assert error is None
-    assert result is not None
-    assert "segment_uuid" in result
-
-
-@pytest.mark.integration
-@pytest.mark.parametrize("test_data", SEGMENT_TEST_DATA)
-@log_test_result
-def test_add_contact_to_segment(mcp_rfq_processor, test_data):
-    """Test adding contact to segment."""
-    result, error = _call_method(
-        mcp_rfq_processor,
-        "add_contact_to_segment",
-        {
-            "segment_uuid": test_data.get("segmentUuid"),
-            "contact_uuid": test_data.get("email", "test@example.com"),
-        },
-        "add_contact_to_segment",
-    )
-
-    assert error is None
-    assert result is not None
-    assert "segment_uuid" in result
 
 
 @pytest.mark.integration

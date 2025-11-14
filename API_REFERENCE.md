@@ -4,8 +4,8 @@
 
 This document provides a comprehensive reference for the GraphQL API operations used by the MCP RFQ Processor, including all queries, mutations, and type definitions from the `ai_rfq_engine` GraphQL backend.
 
-**Version**: 0.1.0  
-**Total MCP Tools**: 27 (all implemented)  
+**Version**: 0.1.1  
+**Total MCP Tools**: 25 (all implemented)  
 **GraphQL Endpoint**: ai_rfq_graphql (AWS Lambda)
 
 ## Table of Contents
@@ -412,20 +412,10 @@ Get files associated with requests.
 
 ### Segment Queries
 
-#### `segment`
-Get segment details.
-
-**Variables:**
-```graphql
-{
-  segmentUuid: String!
-}
-```
-
-**Returns:** `Segment`
+**Note:** Only `segmentContactList` is exposed through MCP tools for read-only segment lookups.
 
 #### `segmentContactList`
-List contacts in a segment.
+List contacts in a segment (read-only access for pricing lookups).
 
 **Variables:**
 ```graphql
@@ -612,35 +602,7 @@ Upload file attachment.
 
 ### Segment Mutations
 
-#### `insertUpdateSegment`
-Create or update pricing segment.
-
-**Variables:**
-```graphql
-{
-  segmentUuid: String
-  segmentName: String!
-  segmentDescription: String
-  updatedBy: String!
-}
-```
-
-**Returns:** `InsertUpdateSegmentType`
-
-#### `insertUpdateSegmentContact`
-Add contact to segment.
-
-**Variables:**
-```graphql
-{
-  segmentContactUuid: String
-  segmentUuid: String!
-  contactUuid: String!
-  updatedBy: String!
-}
-```
-
-**Returns:** `InsertUpdateSegmentContactType`
+**Note:** Segment creation and contact assignment mutations (`insertUpdateSegment`, `insertUpdateSegmentContact`) are managed via backend admin interface and not exposed through MCP tools.
 
 ---
 
@@ -805,9 +767,7 @@ type Segment {
 | 22 | get_installments | installmentList | Query | Installment | Get installment schedule |
 | 23 | upload_rfq_file | insertUpdateFile | Mutation | File | Upload document |
 | 24 | get_rfq_files | fileList | Query | File | Get files |
-| 25 | create_segment | insertUpdateSegment | Mutation | Segment | Create segment |
-| 26 | add_contact_to_segment | insertUpdateSegmentContact | Mutation | Segment | Add contact |
-| 27 | get_segment_contacts | segmentContactList | Query | Segment | List contacts |
+| 25 | get_segment_contacts | segmentContactList | Query | Segment | List contacts (read-only) |
 
 ---
 
