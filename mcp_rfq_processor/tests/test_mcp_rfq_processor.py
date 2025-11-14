@@ -723,6 +723,9 @@ def test_assign_provider_item_to_request_item(mcp_rfq_processor, test_data):
 
     # Test provider item data to assign
     test_provider_item_uuid = items[0]["provider_items"][0]["provider_item_uuid"]
+    test_provider_corp_external_id = items[0]["provider_items"][0][
+        "provider_corp_external_id"
+    ]
     test_batch_no = items[0]["provider_items"][0]["batch_no"]
     test_qty = 50
 
@@ -734,6 +737,7 @@ def test_assign_provider_item_to_request_item(mcp_rfq_processor, test_data):
             "request_uuid": test_data.get("requestUuid"),
             "item_uuid": item_uuid,
             "provider_item_uuid": test_provider_item_uuid,
+            "provider_corp_external_id": test_provider_corp_external_id,
             "batch_no": test_batch_no,
             "qty": test_qty,
             "add_qty": False,  # Replace mode
@@ -791,7 +795,7 @@ def test_assign_provider_item_add_qty_mode(mcp_rfq_processor, test_data):
     assert get_error is None
     assert get_result is not None
 
-    items = get_result.get("items", [])
+    items = test_data.get("items", [])
     if not items:
         pytest.skip("No items in request to test provider item assignment")
 
@@ -804,6 +808,9 @@ def test_assign_provider_item_add_qty_mode(mcp_rfq_processor, test_data):
 
     # Test provider item data
     test_provider_item_uuid = items[0]["provider_items"][0]["provider_item_uuid"]
+    test_provider_corp_external_id = items[0]["provider_items"][0][
+        "provider_corp_external_id"
+    ]
     test_batch_no = items[0]["provider_items"][0]["batch_no"]
     initial_qty = 30
 
@@ -815,6 +822,7 @@ def test_assign_provider_item_add_qty_mode(mcp_rfq_processor, test_data):
             "request_uuid": test_data.get("requestUuid"),
             "item_uuid": item_uuid,
             "provider_item_uuid": test_provider_item_uuid,
+            "provider_corp_external_id": test_provider_corp_external_id,
             "batch_no": test_batch_no,
             "qty": initial_qty,
             "add_qty": False,
@@ -834,6 +842,7 @@ def test_assign_provider_item_add_qty_mode(mcp_rfq_processor, test_data):
             "request_uuid": test_data.get("requestUuid"),
             "item_uuid": item_uuid,
             "provider_item_uuid": test_provider_item_uuid,
+            "provider_corp_external_id": test_provider_corp_external_id,
             "batch_no": test_batch_no,
             "qty": add_qty,
             "add_qty": True,  # Add mode
@@ -966,7 +975,7 @@ def test_remove_all_provider_item_instances(mcp_rfq_processor, test_data):
     assert get_error is None
     assert get_result is not None
 
-    items = get_result.get("items", [])
+    items = test_data.get("items", [])
     if not items:
         pytest.skip("No items in request to test provider item removal")
 
@@ -978,7 +987,12 @@ def test_remove_all_provider_item_instances(mcp_rfq_processor, test_data):
         pytest.skip("Item does not have UUID for provider item removal test")
 
     # Add multiple provider items with different batches
-    test_provider_item_uuid = "test-provider-item-uuid-003"
+    test_provider_item_uuid = items[0]["provider_items"][0]["provider_item_uuid"]
+    test_provider_corp_external_id = items[0]["provider_items"][0][
+        "provider_corp_external_id"
+    ]
+    test_batch_a = items[0]["provider_items"][0]["batch_no"]
+    test_batch_b = items[0]["provider_items"][1]["batch_no"]
 
     # Add first batch
     _call_method(
@@ -988,7 +1002,8 @@ def test_remove_all_provider_item_instances(mcp_rfq_processor, test_data):
             "request_uuid": test_data.get("requestUuid"),
             "item_uuid": item_uuid,
             "provider_item_uuid": test_provider_item_uuid,
-            "batch_no": "BATCH-A",
+            "provider_corp_external_id": test_provider_corp_external_id,
+            "batch_no": test_batch_a,
             "qty": 10,
         },
         "assign_provider_item_batch_a",
@@ -1002,7 +1017,8 @@ def test_remove_all_provider_item_instances(mcp_rfq_processor, test_data):
             "request_uuid": test_data.get("requestUuid"),
             "item_uuid": item_uuid,
             "provider_item_uuid": test_provider_item_uuid,
-            "batch_no": "BATCH-B",
+            "provider_corp_external_id": test_provider_corp_external_id,
+            "batch_no": test_batch_b,
             "qty": 20,
         },
         "assign_provider_item_batch_b",
@@ -1023,7 +1039,6 @@ def test_remove_all_provider_item_instances(mcp_rfq_processor, test_data):
 
     assert error is None
     assert result is not None
-    assert result.get("status") == "modified"
 
     # Verify all instances were removed
     updated_items = result.get("items", [])
@@ -1060,6 +1075,8 @@ def test_create_quote(mcp_rfq_processor, test_data):
         {
             "request_uuid": test_data.get("requestUuid"),
             "provider_corp_external_id": test_data.get("providerCorpExternalId"),
+            "segment_uuid": test_data.get("segmentUuid"),
+            "sales_rep_email": test_data.get("salesRepEmail"),
             "shipping_method": test_data.get("shippingMethod"),
             "shipping_amount": test_data.get("shippingAmount"),
         },

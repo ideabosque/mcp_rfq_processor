@@ -10,6 +10,7 @@ from typing import Any, Dict
 
 import boto3
 import humps
+
 from silvaengine_utility import Utility
 
 # Import centralized error handling utilities
@@ -240,6 +241,10 @@ MCP_CONFIGURATION = {
                         "type": "string",
                         "description": "UUID of the provider item to assign",
                     },
+                    "provider_corp_external_id": {
+                        "type": "string",
+                        "description": "Provider corporation external ID",
+                    },
                     "batch_no": {
                         "type": "string",
                         "description": "Optional batch number for the provider item",
@@ -253,7 +258,7 @@ MCP_CONFIGURATION = {
                         "description": "If true, add to existing quantity; if false, replace quantity (default: false)",
                     },
                 },
-                "required": ["request_uuid", "item_uuid", "provider_item_uuid"],
+                "required": ["request_uuid", "item_uuid", "provider_item_uuid", "provider_corp_external_id"],
             },
         },
         {
@@ -400,6 +405,10 @@ MCP_CONFIGURATION = {
                         "type": "string",
                         "description": "Provider corporation external ID",
                     },
+                    "segment_uuid": {
+                        "type": "string",
+                        "description": "Customer segment UUID for pricing",
+                    },
                     "sales_rep_email": {
                         "type": "string",
                         "description": "Email of the sales representative",
@@ -417,7 +426,7 @@ MCP_CONFIGURATION = {
                     },
                     "notes": {"type": "string", "description": "Additional notes"},
                 },
-                "required": ["request_uuid", "provider_corp_external_id"],
+                "required": ["request_uuid", "provider_corp_external_id", "segment_uuid"],
             },
         },
         {
@@ -1502,6 +1511,7 @@ class MCPRfqProcessor:
             request_uuid: UUID of the request to update
             item_uuid: UUID of the item in the request
             provider_item_uuid: UUID of the provider item to assign
+            provider_corp_external_id: Provider corporation external ID
             batch_no: Optional batch number
             qty: Quantity for this provider item (optional, defaults to item qty)
             add_qty: If True, add to existing quantity; if False, replace quantity (default: False)
@@ -1517,6 +1527,7 @@ class MCPRfqProcessor:
           "qty": 100,
           "provider_items": [
             {
+              "provider_corp_external_id": "PROV-12345",
               "provider_item_uuid": "76109526415051866240",
               "batch_no": "BATCH-001",
               "qty": 100
@@ -1538,6 +1549,11 @@ class MCPRfqProcessor:
             "provider_item_uuid",
             "Provider item UUID is required",
         )
+        validate_not_empty(
+            arguments.get("provider_corp_external_id"),
+            "provider_corp_external_id",
+            "Provider corporation external ID is required",
+        )
 
         # Fetch current request
         current_request = self.get_rfq_request(request_uuid=arguments["request_uuid"])
@@ -1554,6 +1570,7 @@ class MCPRfqProcessor:
         item_found = False
         item_uuid = arguments["item_uuid"]
         provider_item_uuid = arguments["provider_item_uuid"]
+        provider_corp_external_id = arguments["provider_corp_external_id"]
         batch_no = arguments.get("batch_no")
         provider_qty = arguments.get("qty")
         add_qty = arguments.get("add_qty", False)  # Default to replace behavior
@@ -1593,7 +1610,10 @@ class MCPRfqProcessor:
                             )
                 else:
                     # Add new provider item
-                    new_provider_item = {"provider_item_uuid": provider_item_uuid}
+                    new_provider_item = {
+                        "provider_item_uuid": provider_item_uuid,
+                        "provider_corp_external_id": provider_corp_external_id,
+                    }
                     if batch_no is not None:
                         new_provider_item["batch_no"] = batch_no
                     if provider_qty is not None:
@@ -1954,44 +1974,64 @@ class MCPRfqProcessor:
 
         # Create quote items from request items that have provider_items assigned
         request_items = request.get("items", [])
+        provider_corp_external_id = arguments["provider_corp_external_id"]
+        
         if request_items:
-            self.logger.info(f"Creating quote items from {len(request_items)} request items")
+            self.logger.info(
+                f"Creating quote items from {len(request_items)} request items for provider {provider_corp_external_id}"
+            )
 
             for req_item in request_items:
                 provider_items = req_item.get("provider_items", [])
 
                 if provider_items:
-                    # Create a quote item for each provider_item
-                    for provider_item in provider_items:
-                        try:
-                            quote_item_args = {
-                                "quote_uuid": quote["quote_uuid"],
-                                "provider_item_uuid": provider_item.get("provider_item_uuid"),
-                                "item_uuid": req_item.get("item_uuid"),
-                                "qty": provider_item.get("qty", req_item.get("qty", 0)),
-                                "batch_no": provider_item.get("batch_no"),
-                                "request_data": req_item.get("request_data"),
-                            }
+                    # Filter provider_items to only include those matching the quote's provider
+                    matching_provider_items = [
+                        pi for pi in provider_items
+                        if pi.get("provider_corp_external_id") == provider_corp_external_id
+                    ]
+                    
+                    if not matching_provider_items:
+                        self.logger.info(
+                            f"Skipping request item {req_item.get('item_uuid')} - no provider_items for provider {provider_corp_external_id}"
+                        )
+                        continue
+                    
+                    # Create a quote item for each matching provider_item
+                    for provider_item in matching_provider_items:
+                        quote_item_args = {
+                            "quote_uuid": quote["quote_uuid"],
+                            "provider_item_uuid": provider_item.get("provider_item_uuid"),
+                            "item_uuid": req_item.get("item_uuid"),
+                            "qty": provider_item.get("qty", req_item.get("qty", 0)),
+                            "segment_uuid": arguments["segment_uuid"],
+                            "batch_no": provider_item.get("batch_no"),
+                            "request_data": req_item.get("request_data"),
+                            "request_uuid": arguments["request_uuid"],
+                        }
 
-                            # Use the private method to add quote item
-                            self._add_quote_item(**quote_item_args)
-
-                        except Exception as e:
-                            self.logger.warning(
-                                f"Failed to create quote item for provider_item {provider_item.get('provider_item_uuid')}: {e}"
+                        # Use the private method to add quote item
+                        quote_item_result = self._add_quote_item(**quote_item_args)
+                        
+                        # Check if there was an error creating the quote item
+                        if error := propagate_error_if_present(quote_item_result):
+                            self.logger.error(
+                                f"Failed to create quote item for provider_item {provider_item.get('provider_item_uuid')}: {error}"
                             )
+                            # Continue creating other quote items even if one fails
+                            continue
+                        
+                        self.logger.info(
+                            f"Created quote item for provider_item {provider_item.get('provider_item_uuid')}"
+                        )
                 else:
                     self.logger.info(
                         f"Skipping request item {req_item.get('item_uuid')} - no provider_items assigned"
                     )
 
-        # Fetch the updated quote with all quote items
-        quote = self.get_quote(quote_uuid=quote["quote_uuid"])
-
-        # Check for error in response and propagate if present
-        if error := propagate_error_if_present(quote):
-            return error
-
+        # Return the quote (quote items were already created)
+        # Note: The quote object may not include the newly created quote_items
+        # If you need the full quote with items, call get_quote separately
         return quote
 
     # * MCP Function.
@@ -2117,14 +2157,15 @@ class MCPRfqProcessor:
             "providerItemUuid": arguments["provider_item_uuid"],
             "itemUuid": arguments["item_uuid"],
             "qty": arguments["qty"],
-            "segmentUuid": arguments.get("segment_uuid"),
+            "segmentUuid": arguments.get("segment_uuid") or "default",
             "batchNo": arguments.get("batch_no"),
+            "requestUuid": arguments.get("request_uuid"),
             "requestData": arguments.get("request_data"),
             "subtotalDiscount": arguments.get("discount_amount", 0.0),
             "updatedBy": "MCP",
         }
 
-        # Remove None values
+        # Remove None values (but keep "default" for segment_uuid)
         variables = {k: v for k, v in variables.items() if v is not None}
 
         result = self._execute_graphql_query(
