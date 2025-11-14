@@ -562,84 +562,132 @@ List contacts in a segment.
 
 ## Usage Examples
 
-### Complete RFQ Workflow
+### Complete RFQ to Quote Workflow
+
+For the detailed 14-step workflow from customer inquiry to final quote confirmation, see [DEVELOPMENT_PLAN.md - Complete RFQ to Quote Workflow](DEVELOPMENT_PLAN.md#complete-rfq-to-quote-workflow).
+
+**Quick Overview:**
+0. Find Customer Segment
+1. Submit RFQ Request
+2. Lookup Items with End User
+3. Add Items to Request
+4. Lookup Provider Items for Each Item
+5. Lookup Batches for Each Provider Item (Optional)
+6. Assign Provider Items to Request Items
+7. **Calculate Quote Pricing** (NEW - groups by provider/segment, returns discount rules)
+8. Generate Quotes by Confirmation
+9. Negotiate with End User
+10. Apply Discounts with User Confirmation
+11. Update Quote with Shipping
+12. Confirm Quote and Generate Installment Plan
+13. Complete Quote and Process Payment
+
+### Practical Example: End-to-End Quote Generation
 
 ```python
-# 1. Submit RFQ Request
-result = processor.submit_rfq_request(
-    contact_uuid="customer-uuid",
-    request_title="Need 1000 widgets",
-    request_description="Standard grade, blue color",
-    expired_at="2025-12-31T23:59:59Z"
+# Step 0: Find customer segment
+segment_contacts = processor.get_segment_contacts(
+    consumer_corp_external_id="CUSTOMER-001",
+    email="buyer@customer.com"
 )
-request_uuid = result["request_uuid"]
+segment_uuid = segment_contacts[0]["segment_uuid"]
 
-# 2. Search for matching items
-items = processor.search_items(
-    item_name="widget",
-    item_type="product"
+# Step 1-3: Create request and add items
+request = processor.submit_rfq_request(
+    contact_uuid="buyer@customer.com",
+    request_title="Q1 Production Materials",
+    items=[]
+)
+request_uuid = request["request_uuid"]
+
+processor.add_item_to_rfq_request(
+    request_uuid=request_uuid,
+    item={"item_uuid": "item-uuid-1", "qty": 500}
 )
 
-# 3. Check provider inventory
-provider_items = processor.get_provider_items(
-    item_uuid=items[0]["item_uuid"],
-    provider_corp_external_id="PROVIDER-001"
-)
+# Step 4-6: Assign provider items to request
+current_request = processor.get_rfq_request(request_uuid=request_uuid)
+updated_items = current_request["items"].copy()
+updated_items[0]["provider_items"] = [
+    {
+        "provider_corp_external_id": "PROVIDER-001",
+        "provider_item_uuid": "prov-item-uuid-1",
+        "batch_no": "LOT-2025-001",
+        "qty": 500
+    }
+]
+processor.update_rfq_request(request_uuid=request_uuid, items=updated_items)
 
-# 4. Create quote (note: shipping will be set later via update)
+# Step 7: Calculate pricing with discount rules (NEW)
+pricing = processor.calculate_quote_pricing(
+    request_uuid=request_uuid,
+    segment_uuid=segment_uuid
+)
+# Returns grouped pricing with discount_rules and price_tiers for LLM decision-making
+# {
+#   "groups": [{
+#     "provider_corp_external_id": "PROVIDER-001",
+#     "items": [{
+#       "qty": 500,
+#       "price_per_uom": 9.50,
+#       "guardrail_price_per_uom": 9.50,
+#       "slow_move_item": true,
+#       "subtotal": 4750.00,
+#       "price_tiers": [...]  # Available pricing tiers
+#     }],
+#     "subtotal": 4750.00,
+#     "discount_rules": [...]  # Applicable discount rules
+#   }],
+#   "subtotal": 4750.00
+# }
+
+# Step 8-10: Create quote and add items with user-confirmed discount
 quote = processor.create_quote(
     request_uuid=request_uuid,
     provider_corp_external_id="PROVIDER-001",
-    sales_rep_email="sales@provider.com",
-    status="draft"
+    sales_rep_email="sales@provider1.com"
 )
 
-# 5. Add line items to quote
-quote_item = processor.add_quote_item(
+processor.add_quote_item(
     quote_uuid=quote["quote_uuid"],
-    provider_item_uuid=provider_items[0]["provider_item_uuid"],
-    item_uuid=items[0]["item_uuid"],
-    qty=1000,
-    discount_amount=0.00
+    provider_item_uuid="prov-item-uuid-1",
+    item_uuid="item-uuid-1",
+    segment_uuid=segment_uuid,
+    qty=500,
+    batch_no="LOT-2025-001",
+    discount_amount=237.50  # 5% slow-move discount (user confirmed)
 )
 
-# 6. Update quote with shipping information
+# Step 11: Add shipping
 processor.update_quote(
     request_uuid=request_uuid,
     quote_uuid=quote["quote_uuid"],
     shipping_method="express",
-    shipping_amount=50.00
+    shipping_amount=75.00
 )
 
-# 7. Calculate final pricing with discounts
-final_quote = processor.calculate_quote_pricing(
-    quote_uuid=quote["quote_uuid"]
-)
-
-# 8. Create installment plan (installment_ratio auto-calculated)
-installment1 = processor.create_installment(
+# Step 12-13: Create installment plan and submit
+processor.create_installment(
     quote_uuid=quote["quote_uuid"],
     installment_number=1,
     due_date="2025-12-01T00:00:00Z",
-    amount=5000.00,  # installment_ratio will be calculated automatically
-    status="pending"
+    amount=2293.75  # 50% of final total
 )
 
-installment2 = processor.create_installment(
-    quote_uuid=quote["quote_uuid"],
-    installment_number=2,
-    due_date="2026-01-01T00:00:00Z",
-    amount=5000.00,  # installment_ratio will be calculated automatically
-    status="pending"
-)
-
-# 9. Update quote status
 processor.update_quote(
     request_uuid=request_uuid,
     quote_uuid=quote["quote_uuid"],
     status="submitted"
 )
 ```
+
+### Key Principles
+
+- **LLM-Driven**: LLM asks user questions at each step
+- **Segment-Based**: Always identify customer segment first for correct pricing
+- **Information Provider**: `calculate_quote_pricing` provides discount rules; LLM makes decisions with user input
+- **User Confirmation**: Apply discounts only after user confirms
+- **Multi-Provider**: Create separate quotes per provider for comparison
 
 ### AI Assistant Conversation Example
 

@@ -216,6 +216,8 @@ Search quotes.
 #### `itemPriceTierList`
 Get active tiered pricing for items based on item, provider, and customer segments.
 
+**Note:** Typically used via `calculate_quote_pricing` which automatically filters tiers by quantity. Direct use is available for LLM-driven price exploration.
+
 **Variables:**
 ```graphql
 {
@@ -224,7 +226,13 @@ Get active tiered pricing for items based on item, provider, and customer segmen
   itemUuid: String
   providerItemUuid: String
   segmentUuid: String
-  status: String  # Fixed to "active"
+  minQuantityGreaterThen: Int  # Filter: tier.min_quantity > value
+  maxQuantityGreaterThen: Int  # Filter: tier.max_quantity > value
+  minQuantityLessThen: Int     # Filter: tier.min_quantity < value
+  maxQuantityLessThen: Int     # Filter: tier.max_quantity < value
+  minPrice: Float              # Filter: tier.price >= value
+  maxPrice: Float              # Filter: tier.price <= value
+  status: String               # Fixed to "active"
 }
 ```
 
@@ -250,6 +258,8 @@ Get active tiered pricing for items based on item, provider, and customer segmen
 #### `discountRuleList`
 Get discount rules with filtering options for subtotal thresholds and discount percentages.
 
+**Note:** Typically used via `calculate_quote_pricing` which automatically filters rules by group subtotal. Direct use is available for LLM-driven discount exploration.
+
 **Variables:**
 ```graphql
 {
@@ -258,13 +268,13 @@ Get discount rules with filtering options for subtotal thresholds and discount p
   itemUuid: String
   providerItemUuid: String
   segmentUuid: String
-  maxSubtotalGreaterThan: Float
-  minSubtotalGreaterThan: Float
-  maxSubtotalLessThan: Float
-  minSubtotalLessThan: Float
-  maxDiscountPercentage: Float
-  minDiscountPercentage: Float
-  status: String  # Filter by status (e.g., "active", "inreview")
+  maxSubtotalGreaterThan: Float  # Filter: rule.max_subtotal > value
+  minSubtotalGreaterThan: Float  # Filter: rule.min_subtotal > value
+  maxSubtotalLessThan: Float     # Filter: rule.max_subtotal < value
+  minSubtotalLessThan: Float     # Filter: rule.min_subtotal < value
+  maxDiscountPercentage: Float   # Filter: rule.discount <= value
+  minDiscountPercentage: Float   # Filter: rule.discount >= value
+  status: String                 # Filter by status (e.g., "active", "inreview")
 }
 ```
 
@@ -285,6 +295,86 @@ Get discount rules with filtering options for subtotal thresholds and discount p
 - `pageSize`: Items per page
 - `pageNumber`: Current page number
 - `total`: Total number of discount rules
+
+#### `calculate_quote_pricing` (Business Logic)
+Calculate grouped pricing from request with provider_items, including applicable discount rules and price tiers.
+
+**Note:** This is a business logic function that reads from REQUEST (not quote) and groups items by (provider_corp_external_id, segment_uuid).
+
+**Parameters:**
+```python
+{
+  request_uuid: String!     # RFQ request UUID
+  segment_uuid: String!     # Customer segment UUID for pricing rules
+}
+```
+
+**Returns:** Custom pricing structure (not a GraphQL query)
+
+**Process:**
+1. Reads request items with provider_items arrays
+2. Fetches provider_item details (base_price_per_uom)
+3. Fetches batch details if batch_no specified (guardrail_price_per_uom, slow_move_item)
+4. Groups items by (provider_corp_external_id, segment_uuid)
+5. Calculates subtotals per group
+6. Fetches applicable discount_rules filtered by group subtotal
+7. Fetches applicable price_tiers filtered by item quantity
+
+**Response Structure:**
+```json
+{
+  "request_uuid": "req-uuid",
+  "segment_uuid": "seg-uuid",
+  "groups": [
+    {
+      "provider_corp_external_id": "PROVIDER-001",
+      "segment_uuid": "seg-uuid",
+      "items": [
+        {
+          "item_uuid": "item-uuid",
+          "provider_item_uuid": "prov-item-uuid",
+          "batch_no": "LOT-2025-001",
+          "qty": 500,
+          "price_per_uom": 9.50,
+          "guardrail_price_per_uom": 9.50,
+          "slow_move_item": true,
+          "subtotal": 4750.00,
+          "price_tiers": [
+            {
+              "itemPriceTierUuid": "tier-uuid",
+              "quantityGreaterThen": 500,
+              "quantityLessThen": 1000,
+              "marginPerUom": 8.75
+            }
+          ]
+        }
+      ],
+      "subtotal": 4750.00,
+      "discount_rules": [
+        {
+          "discountRuleUuid": "rule-uuid",
+          "subtotalGreaterThan": 1000.00,
+          "subtotalLessThan": 10000.00,
+          "maxDiscountPercentage": 5.0
+        }
+      ]
+    }
+  ],
+  "subtotal": 4750.00
+}
+```
+
+**Key Features:**
+- **Information Provider Pattern**: Returns discount_rules and price_tiers WITHOUT applying them
+- **LLM Decision Making**: LLM presents options to user and applies discounts only after confirmation
+- **Multi-Provider Support**: Groups enable comparison across multiple providers
+- **Batch-Specific Pricing**: Includes guardrail pricing and slow-move flags when available
+
+**Usage Notes:**
+- Call this BEFORE creating quotes (Step 7 in main workflow)
+- Use returned discount_rules to present options to user
+- Use returned price_tiers to suggest quantity adjustments
+- Create quotes only after user confirms pricing (Step 8)
 
 ### Installment Queries
 
@@ -708,9 +798,9 @@ type Segment {
 | 15 | remove_quote_item | deleteQuoteItem | Mutation | Quote | Remove item from quote |
 | 16 | get_quote | quote | Query | Quote | Retrieve quote |
 | 17 | search_quotes | quoteList | Query | Quote | Search quotes |
-| 18 | get_item_price_tiers | itemPriceTierList | Query | Pricing | Get tiered pricing |
-| 19 | get_discount_rules | discountRuleList | Query | Pricing | Get discount rules |
-| 20 | calculate_quote_pricing | Multiple | Query | Pricing | Business logic combining queries |
+| 18 | get_item_price_tiers | itemPriceTierList | Query | Pricing | Get tiered pricing (with qty filters) |
+| 19 | get_discount_rules | discountRuleList | Query | Pricing | Get discount rules (with subtotal filters) |
+| 20 | calculate_quote_pricing | Multiple Queries | Business Logic | Pricing | Groups request items, returns pricing + rules |
 | 21 | create_installment | insertUpdateInstallment | Mutation | Installment | Create installment |
 | 22 | get_installments | installmentList | Query | Installment | Get installment schedule |
 | 23 | upload_rfq_file | insertUpdateFile | Mutation | File | Upload document |
@@ -723,16 +813,36 @@ type Segment {
 
 ## Example Queries
 
-### Complete RFQ Workflow Example
+### Complete RFQ to Quote Workflow Example (Updated)
+
+For the complete 14-step workflow, see [DEVELOPMENT_PLAN.md - Complete RFQ to Quote Workflow](DEVELOPMENT_PLAN.md#complete-rfq-to-quote-workflow).
 
 ```graphql
-# Step 1: Submit RFQ Request
+# Step 0: Find Customer Segment
+query {
+  segmentContactList(
+    consumerCorpExternalId: "CUSTOMER-001",
+    email: "buyer@customer.com"
+  ) {
+    totalCount
+    segmentContacts {
+      segmentUuid
+      segment {
+        segmentName
+        segmentDescription
+      }
+    }
+  }
+}
+
+# Step 1: Submit RFQ Request (with empty items array)
 mutation {
   insertUpdateRequest(
-    contactUuid: "contact-123",
-    requestTitle: "Office Supplies Q1 2025",
-    requestDescription: "Need supplies for new office location",
+    contactUuid: "buyer@customer.com",
+    requestTitle: "Q1 Production Materials",
+    requestDescription: "Need materials for production",
     expiredAt: "2025-12-31",
+    items: [],
     status: "pending",
     updatedBy: "MCP"
   ) {
@@ -744,98 +854,159 @@ mutation {
   }
 }
 
-# Step 2: Search Items
+# Step 2-3: Search Items and Add to Request
 query {
   itemList(
-    pageNumber: 1,
-    limit: 50,
-    itemType: "supplies",
-    itemName: "paper"
+    itemName: "widget",
+    itemType: "product"
   ) {
-    totalCount
     items {
       itemUuid
       itemName
-      itemDescription
       uom
     }
   }
 }
 
-# Step 3: Get Provider Items
+# Step 4-5: Get Provider Items and Batches
 query {
   providerItemList(
     itemUuid: "item-123",
-    providerCorpExternalId: "provider-789"
+    providerCorpExternalId: "PROVIDER-001",
+    inStock: true
   ) {
-    totalCount
     providerItems {
       providerItemUuid
       basePricePerUom
       availableQuantity
-      leadTimeDays
     }
   }
 }
 
-# Step 4: Create Quote
+query {
+  providerItemBatchList(
+    providerItemUuid: "prov-item-123",
+    inStock: true
+  ) {
+    providerItemBatches {
+      batchNo
+      guardrailPricePerUom
+      slowMoveItem
+      expiredAt
+    }
+  }
+}
+
+# Step 6: Assign Provider Items to Request Items
 mutation {
-  insertUpdateQuote(
+  insertUpdateRequest(
     requestUuid: "req-456",
-    providerCorpExternalId: "provider-789",
-    shippingMethod: "express",
-    shippingAmount: 50.0,
-    taxAmount: 125.0,
-    status: "draft",
     items: [
       {
-        itemUuid: "item-A",
-        providerItemUuid: "pitem-1",
-        quantity: 100,
-        unitPrice: 10.0
-      },
-      {
-        itemUuid: "item-B",
-        providerItemUuid: "pitem-2",
-        quantity: 50,
-        unitPrice: 25.0
+        itemUuid: "item-123",
+        qty: 500,
+        providerItems: [
+          {
+            providerCorpExternalId: "PROVIDER-001",
+            providerItemUuid: "prov-item-123",
+            batchNo: "LOT-2025-001",
+            qty: 500
+          }
+        ]
       }
     ],
     updatedBy: "MCP"
   ) {
-    quote {
-      quoteUuid
-      totalQuoteAmount
-      status
-      quoteItems {
-        quoteItemUuid
+    request {
+      requestUuid
+      items {
         itemUuid
-        quantity
-        unitPrice
-        totalAmount
+        qty
+        providerItems
       }
     }
   }
 }
 
-# Step 5: Apply Discount to Quote Item
+# Step 7: Calculate Quote Pricing (MCP business logic - not pure GraphQL)
+# This is handled by the calculate_quote_pricing MCP tool
+# Returns grouped pricing with discount_rules and price_tiers
+
+# Step 8: Create Quote (after user confirms pricing)
+mutation {
+  insertUpdateQuote(
+    requestUuid: "req-456",
+    providerCorpExternalId: "PROVIDER-001",
+    salesRepEmail: "sales@provider1.com",
+    status: "draft",
+    updatedBy: "MCP"
+  ) {
+    quote {
+      quoteUuid
+      status
+    }
+  }
+}
+
+# Step 10: Add Quote Items with User-Confirmed Discount
 mutation {
   insertUpdateQuoteItem(
-    quoteItemUuid: "qi-123",
-    discountPercent: 10.0,
-    discountNotes: "Volume discount for 100+ units",
+    quoteUuid: "quote-789",
+    providerItemUuid: "prov-item-123",
+    itemUuid: "item-123",
+    segmentUuid: "seg-uuid",
+    qty: 500,
+    batchNo: "LOT-2025-001",
+    discountAmount: 237.50,
     updatedBy: "MCP"
   ) {
     quoteItem {
       quoteItemUuid
+      qty
       discountAmount
-      discountPercent
       totalAmount
     }
   }
 }
 
-# Step 6: Update Quote Status
+# Step 11: Update Quote with Shipping
+mutation {
+  insertUpdateQuote(
+    requestUuid: "req-456",
+    quoteUuid: "quote-789",
+    shippingMethod: "express",
+    shippingAmount: 75.0,
+    updatedBy: "MCP"
+  ) {
+    quote {
+      quoteUuid
+      shippingMethod
+      shippingAmount
+      totalQuoteAmount
+    }
+  }
+}
+
+# Step 12: Create Installment Plan
+mutation {
+  insertUpdateInstallment(
+    quoteUuid: "quote-789",
+    installmentNumber: 1,
+    dueDate: "2025-12-01",
+    amount: 2293.75,
+    status: "pending",
+    updatedBy: "MCP"
+  ) {
+    installment {
+      installmentUuid
+      installmentNumber
+      amount
+      installmentRatio  # Auto-calculated by backend
+    }
+  }
+}
+
+# Step 13: Submit Quote
 mutation {
   insertUpdateQuote(
     quoteUuid: "quote-789",
@@ -846,7 +1017,44 @@ mutation {
       quoteUuid
       status
       totalQuoteAmount
-      updatedAt
+    }
+  }
+}
+```
+
+### Pricing Queries with Filters (New)
+
+```graphql
+# Get price tiers filtered by quantity
+query {
+  itemPriceTierList(
+    itemUuid: "item-123",
+    providerItemUuid: "prov-item-123",
+    segmentUuid: "seg-uuid",
+    maxQuantityGreaterThen: 500,  # Get tiers where max_qty > 500
+    status: "active"
+  ) {
+    itemPriceTierList {
+      itemPriceTierUuid
+      quantityGreaterThen
+      quantityLessThen
+      marginPerUom
+    }
+  }
+}
+
+# Get discount rules filtered by subtotal
+query {
+  discountRuleList(
+    segmentUuid: "seg-uuid",
+    maxSubtotalGreaterThan: 4750.00,  # Get rules where max_subtotal > 4750
+    status: "active"
+  ) {
+    discountRuleList {
+      discountRuleUuid
+      subtotalGreaterThan
+      subtotalLessThan
+      maxDiscountPercentage
     }
   }
 }

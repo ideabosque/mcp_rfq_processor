@@ -584,7 +584,7 @@ MCP_CONFIGURATION = {
         # Pricing Tools (3)
         {
             "name": "get_item_price_tiers",
-            "description": "Get active tiered pricing for items based on item, provider, customer segments, and quantity ranges. Returns applicable price tiers with margin information.",
+            "description": "Get active tiered pricing for items based on item, provider, customer segments, and quantity ranges. Returns applicable price tiers with margin information. Typically used via calculate_quote_pricing, but can be called directly to explore volume pricing scenarios or answer 'what if' questions.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -637,7 +637,7 @@ MCP_CONFIGURATION = {
         },
         {
             "name": "get_discount_rules",
-            "description": "Get applicable discount rules based on item, provider item, segment, and subtotal/discount thresholds. Returns discount rules with subtotal ranges and maximum discount percentages. By default, only active rules are returned.",
+            "description": "Get applicable discount rules based on item, provider item, segment, and subtotal/discount thresholds. Returns discount rules with subtotal ranges and maximum discount percentages. By default, only active rules are returned. Typically used via calculate_quote_pricing, but can be called directly to explore discount options or check rules for specific scenarios.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -690,20 +690,20 @@ MCP_CONFIGURATION = {
         },
         {
             "name": "calculate_quote_pricing",
-            "description": "Calculate final pricing for a quote with applicable discounts and price tiers. Returns detailed pricing breakdown for each item.",
+            "description": "Calculate pricing information for an RFQ request grouped by provider and segment. Reads from request items with provider_items arrays, groups by (provider_corp_external_id, segment_uuid), and provides group-level subtotals, item-level details with price tiers, and applicable discount rules. Returns pricing structure for LLM to analyze and discuss options with end user. Does NOT apply discounts - only provides information.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "quote_uuid": {
+                    "request_uuid": {
                         "type": "string",
-                        "description": "UUID of the quote",
+                        "description": "UUID of the RFQ request",
                     },
                     "segment_uuid": {
                         "type": "string",
-                        "description": "Customer segment for pricing",
+                        "description": "Customer segment for pricing (required for discount rules and price tiers)",
                     },
                 },
-                "required": ["quote_uuid"],
+                "required": ["request_uuid", "segment_uuid"],
             },
         },
         # Installment Tools (2)
@@ -2448,53 +2448,268 @@ class MCPRfqProcessor:
     @handle_errors(operation_name="calculate quote pricing")
     def calculate_quote_pricing(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Calculate final pricing for a quote with discounts and tiers.
-        This is a business logic method that combines multiple GraphQL queries.
+        Calculate pricing information for an RFQ request grouped by provider and segment.
+
+        Reads from request items with provider_items arrays and provides:
+        - Group-level subtotals (sum of item subtotals)
+        - Item-level details with guardrail pricing, batch info, and price tiers
+        - Applicable discount rules for LLM to discuss with end user
+
+        Returns pricing structure with discount options for decision-making.
+        Does NOT apply discounts - only provides information.
+
+        Args:
+            request_uuid: UUID of the RFQ request
+            segment_uuid: Customer segment UUID for pricing rules
+
+        Returns:
+            Grouped pricing structure with subtotals, price tiers, and discount rules
         """
-        self.logger.info(f"Calculating quote pricing: {arguments}")
+        self.logger.info(f"Calculating quote pricing info: {arguments}")
 
-        # Get the quote details
-        quote = self.get_quote(quote_uuid=arguments["quote_uuid"])
+        request_uuid = arguments["request_uuid"]
+        segment_uuid = arguments["segment_uuid"]
 
-        # Check if quote has an error and propagate if present
-        if error := propagate_error_if_present(quote):
+        # Step 1: Get the request with items and provider_items
+        request = self.get_rfq_request(request_uuid=request_uuid)
+        if error := propagate_error_if_present(request):
             return error
 
-        # For each quote item, get applicable discounts
-        quote_items = quote.get("quote_items", [])
-        pricing_details = []
+        request_items = request.get("items", [])
+        if not request_items:
+            return {
+                "request_uuid": request_uuid,
+                "segment_uuid": segment_uuid,
+                "groups": [],
+                "subtotal": 0,
+            }
 
-        for item in quote_items:
-            # Get discount rules for this item
-            discount_rules = self.get_discount_rules(
-                item_uuid=item["item_uuid"],
-                segment_uuid=arguments.get("segment_uuid"),
-            )
+        # Step 2: Extract and group provider_items by (provider_corp_external_id, segment_uuid)
+        grouped_items = self._group_provider_items_from_request(request_items, segment_uuid)
 
-            # Get price tiers
-            price_tiers = self.get_item_price_tiers(
-                item_uuid=item["item_uuid"],
-                segment_uuid=arguments.get("segment_uuid"),
-                min_quantity=item["quantity"],
-            )
+        # Step 4: Build output structure with discount rules and price tiers
+        pricing_groups = []
+        overall_subtotal = 0
 
-            pricing_details.append(
-                {
-                    "quote_item_uuid": item["quote_item_uuid"],
-                    "item_uuid": item["item_uuid"],
-                    "quantity": item["quantity"],
-                    "unit_price": item["unit_price"],
-                    "applicable_discounts": discount_rules.get("discount_rules", []),
-                    "applicable_price_tiers": price_tiers.get("item_price_tiers", []),
-                    "current_total": item["total_amount"],
+        for group_key, group_data in grouped_items.items():
+            provider_id, seg_uuid = group_key
+
+            # Prepare item details with guardrail, batch info, and price tiers
+            items_info = []
+            for item in group_data["items"]:
+                item_qty = item.get("qty", 0)
+                item_uuid = item.get("item_uuid")
+                provider_item_uuid = item.get("provider_item_uuid")
+
+                # Get price tiers applicable to this item's quantity
+                # Get tiers where quantity_greater_then <= item_qty
+                price_tiers_result = self.get_item_price_tiers(
+                    item_uuid=item_uuid,
+                    provider_item_uuid=provider_item_uuid,
+                    segment_uuid=seg_uuid,
+                    max_quantity_greater_then=item_qty,  # Tiers where qty_greater_then <= item_qty
+                    limit=50
+                )
+
+                price_tiers = []
+                if not propagate_error_if_present(price_tiers_result):
+                    price_tiers = price_tiers_result.get("item_price_tier_list", [])
+
+                item_data = {
+                    "provider_item_uuid": provider_item_uuid,
+                    "item_uuid": item_uuid,
+                    "batch_no": item.get("batch_no"),
+                    "qty": item_qty,
+                    "price_per_uom": item.get("price_per_uom"),
+                    "guardrail_price_per_uom": item.get("guardrail_price_per_uom"),
+                    "subtotal": item.get("subtotal"),
+                    "slow_move_item": item.get("slow_move_item", False),
+                    "price_tiers": price_tiers,
                 }
+                items_info.append(item_data)
+
+            # Get applicable discount rules for this group's subtotal
+            group_subtotal = group_data["group_subtotal"]
+            discount_rules_result = self.get_discount_rules(
+                segment_uuid=seg_uuid,
+                max_subtotal_greater_than=group_subtotal,
+                min_subtotal_less_than=group_subtotal,
+                limit=50
             )
 
+            discount_rules = []
+            if not propagate_error_if_present(discount_rules_result):
+                discount_rules = discount_rules_result.get("discount_rule_list", [])
+
+            group_info = {
+                "provider_corp_external_id": provider_id,
+                "subtotal": group_subtotal,
+                "items": items_info,
+                "discount_rules": discount_rules,
+            }
+
+            pricing_groups.append(group_info)
+            overall_subtotal += group_subtotal
+
+        # Step 3: Return clean structure
         return {
-            "quote_uuid": quote["quote_uuid"],
-            "pricing_details": pricing_details,
-            "quote_total": quote["total_quote_amount"],
+            "request_uuid": request_uuid,
+            "segment_uuid": segment_uuid,
+            "groups": pricing_groups,
+            "subtotal": overall_subtotal,
         }
+
+    def _group_provider_items_from_request(
+        self, request_items: list, segment_uuid: str
+    ) -> Dict[tuple, Dict]:
+        """
+        Extract provider_items from request items and group by (provider_corp_external_id, segment_uuid).
+
+        Request item structure:
+        {
+            "item_uuid": "...",
+            "item_name": "...",
+            "qty": 100,
+            "provider_items": [
+                {
+                    "provider_item_uuid": "...",
+                    "provider_corp_external_id": "PROV-001",
+                    "batch_no": "BATCH-001",
+                    "qty": 50
+                },
+                {
+                    "provider_item_uuid": "...",
+                    "provider_corp_external_id": "PROV-002",
+                    "batch_no": null,
+                    "qty": 50
+                }
+            ]
+        }
+
+        Args:
+            request_items: List of items from request with provider_items arrays
+            segment_uuid: Segment UUID for grouping
+
+        Returns:
+            Dictionary with group keys and aggregated data:
+            {
+                (provider_id, segment_uuid): {
+                    "items": [list of provider items with pricing],
+                    "group_subtotal": sum of subtotals
+                }
+            }
+        """
+        groups = {}
+
+        for req_item in request_items:
+            item_uuid = req_item.get("item_uuid")
+            provider_items = req_item.get("provider_items", [])
+
+            if not provider_items:
+                self.logger.warning(
+                    f"Request item {item_uuid} has no provider_items, skipping"
+                )
+                continue
+
+            # Process each provider_item in the array
+            for prov_item in provider_items:
+                provider_id = prov_item.get("provider_corp_external_id")
+                provider_item_uuid = prov_item.get("provider_item_uuid")
+                batch_no = prov_item.get("batch_no")
+                qty = prov_item.get("qty", req_item.get("qty", 0))
+
+                if not provider_id or not provider_item_uuid:
+                    self.logger.warning(
+                        f"Provider item missing required fields: {prov_item}"
+                    )
+                    continue
+
+                # Fetch provider item details for pricing
+                try:
+                    provider_items_result = self.get_provider_items(
+                        provider_item_uuid=provider_item_uuid,
+                        limit=1
+                    )
+
+                    if error := propagate_error_if_present(provider_items_result):
+                        self.logger.error(
+                            f"Failed to fetch provider item {provider_item_uuid}: {error}"
+                        )
+                        continue
+
+                    provider_items_list = provider_items_result.get("provider_item_list", [])
+                    if not provider_items_list:
+                        self.logger.warning(
+                            f"Provider item {provider_item_uuid} not found"
+                        )
+                        continue
+
+                    provider_item_data = provider_items_list[0]
+                    base_price_per_uom = provider_item_data.get("base_price_per_uom", 0)
+
+                    # Validate pricing exists
+                    if base_price_per_uom <= 0:
+                        self.logger.warning(
+                            f"Provider item {provider_item_uuid} has invalid base_price_per_uom: {base_price_per_uom}"
+                        )
+                        # Continue anyway, will show $0 pricing for LLM to handle
+
+
+                    # Get batch-specific pricing if batch_no exists
+                    guardrail_price_per_uom = base_price_per_uom
+                    slow_move_item = False
+
+                    if batch_no:
+                        batch_result = self.get_provider_item_batches(
+                            provider_item_uuid=provider_item_uuid,
+                            batch_number=batch_no,
+                            limit=1
+                        )
+
+                        if not propagate_error_if_present(batch_result):
+                            batch_list = batch_result.get("provider_item_batch_list", [])
+                            if batch_list:
+                                batch_data = batch_list[0]
+                                guardrail_price_per_uom = batch_data.get(
+                                    "guardrail_price_per_uom", base_price_per_uom
+                                )
+                                slow_move_item = batch_data.get("slow_move_item", False)
+
+                    # Calculate subtotal using base_price_per_uom
+                    price_per_uom = base_price_per_uom
+                    subtotal = qty * price_per_uom
+
+                    # Build item data
+                    item_data = {
+                        "provider_item_uuid": provider_item_uuid,
+                        "item_uuid": item_uuid,
+                        "batch_no": batch_no,
+                        "qty": qty,
+                        "price_per_uom": price_per_uom,
+                        "guardrail_price_per_uom": guardrail_price_per_uom,
+                        "subtotal": subtotal,
+                        "slow_move_item": slow_move_item,
+                    }
+
+                    # Group by (provider_corp_external_id, segment_uuid)
+                    group_key = (provider_id, segment_uuid)
+
+                    if group_key not in groups:
+                        groups[group_key] = {
+                            "items": [],
+                            "group_subtotal": 0,
+                        }
+
+                    groups[group_key]["items"].append(item_data)
+                    groups[group_key]["group_subtotal"] += subtotal
+
+                except Exception as e:
+                    self.logger.error(
+                        f"Error processing provider item {provider_item_uuid}: {e}"
+                    )
+                    continue
+
+        return groups
 
     # ==================== Installment Tools ====================
 
