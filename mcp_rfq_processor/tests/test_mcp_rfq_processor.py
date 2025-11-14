@@ -459,15 +459,25 @@ def test_get_provider_item_batches(mcp_rfq_processor, test_data):
 @pytest.mark.parametrize("test_data", ITEM_PRICE_TIER_LIST_TEST_DATA)
 @log_test_result
 def test_get_item_price_tiers(mcp_rfq_processor, test_data):
-    """Test getting active item price tiers."""
+    """Test getting active item price tiers with quantity and price filters."""
     # Build arguments from test data
     arguments = {
         "page_number": test_data.get("pageNumber", 1),
         "limit": test_data.get("limit", 50),
     }
 
-    # Add optional filters (basic filters only)
-    optional_fields = ["itemUuid", "providerItemUuid", "segmentUuid"]
+    # Add optional filters (including new quantity and price filters)
+    optional_fields = [
+        "itemUuid",
+        "providerItemUuid",
+        "segmentUuid",
+        "minQuantityGreaterThen",
+        "maxQuantityGreaterThen",
+        "minQuantityLessThen",
+        "maxQuantityLessThen",
+        "minPrice",
+        "maxPrice",
+    ]
 
     for field in optional_fields:
         if test_data.get(field) is not None:
@@ -508,15 +518,25 @@ def test_get_item_price_tiers(mcp_rfq_processor, test_data):
 @pytest.mark.parametrize("test_data", DISCOUNT_RULE_LIST_TEST_DATA)
 @log_test_result
 def test_get_discount_rules(mcp_rfq_processor, test_data):
-    """Test getting discount rules with various filter combinations."""
+    """Test getting discount rules with various filter combinations including subtotal and discount percentage filters."""
     # Build arguments from test data
     arguments = {
         "page_number": test_data.get("pageNumber", 1),
         "limit": test_data.get("limit", 50),
     }
 
-    # Add optional filters
-    optional_fields = ["itemUuid", "providerItemUuid", "segmentUuid"]
+    # Add optional filters (including new subtotal and discount percentage filters)
+    optional_fields = [
+        "itemUuid",
+        "providerItemUuid",
+        "segmentUuid",
+        "maxSubtotalGreaterThan",
+        "minSubtotalGreaterThan",
+        "maxSubtotalLessThan",
+        "minSubtotalLessThan",
+        "maxDiscountPercentage",
+        "minDiscountPercentage",
+    ]
 
     for field in optional_fields:
         if test_data.get(field) is not None:

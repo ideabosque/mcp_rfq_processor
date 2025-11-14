@@ -584,7 +584,7 @@ MCP_CONFIGURATION = {
         # Pricing Tools (3)
         {
             "name": "get_item_price_tiers",
-            "description": "Get active tiered pricing for items based on item, provider, and customer segments. Returns applicable price tiers with margin information.",
+            "description": "Get active tiered pricing for items based on item, provider, customer segments, and quantity ranges. Returns applicable price tiers with margin information.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -607,6 +607,30 @@ MCP_CONFIGURATION = {
                     "segment_uuid": {
                         "type": "string",
                         "description": "Filter by customer segment UUID",
+                    },
+                    "min_quantity_greater_then": {
+                        "type": "number",
+                        "description": "Filter tiers where quantity_greater_then is at least this value",
+                    },
+                    "max_quantity_greater_then": {
+                        "type": "number",
+                        "description": "Filter tiers where quantity_greater_then is at most this value (use to find tiers applicable to a specific quantity)",
+                    },
+                    "min_quantity_less_then": {
+                        "type": "number",
+                        "description": "Filter tiers where quantity_less_then is at least this value (use to find tiers applicable to a specific quantity)",
+                    },
+                    "max_quantity_less_then": {
+                        "type": "number",
+                        "description": "Filter tiers where quantity_less_then is at most this value",
+                    },
+                    "min_price": {
+                        "type": "number",
+                        "description": "Filter tiers where price_per_uom is at least this value",
+                    },
+                    "max_price": {
+                        "type": "number",
+                        "description": "Filter tiers where price_per_uom is at most this value",
                     },
                 },
             },
@@ -2340,6 +2364,11 @@ class MCPRfqProcessor:
         """
         Get tiered pricing for items.
         Maps to GraphQL: itemPriceTierList query
+
+        Supports quantity-based filtering to find applicable price tiers:
+        - Use max_quantity_greater_then and min_quantity_less_then to find tiers for a specific quantity
+        - Example: For qty=100, use max_quantity_greater_then=100, min_quantity_less_then=100
+          to find tiers where quantity_greater_then <= 100 < quantity_less_then
         """
         variables = {
             "pageNumber": arguments.get("page_number", 1),
@@ -2347,6 +2376,12 @@ class MCPRfqProcessor:
             "itemUuid": arguments.get("item_uuid"),
             "providerItemUuid": arguments.get("provider_item_uuid"),
             "segmentUuid": arguments.get("segment_uuid"),
+            "minQuantityGreaterThen": arguments.get("min_quantity_greater_then"),
+            "maxQuantityGreaterThen": arguments.get("max_quantity_greater_then"),
+            "minQuantityLessThen": arguments.get("min_quantity_less_then"),
+            "maxQuantityLessThen": arguments.get("max_quantity_less_then"),
+            "minPrice": arguments.get("min_price"),
+            "maxPrice": arguments.get("max_price"),
             "status": "active",
         }
 
@@ -2373,6 +2408,11 @@ class MCPRfqProcessor:
         Maps to GraphQL: discountRuleList query
 
         Returns discount rules with filtering options for subtotal thresholds and discount percentages.
+
+        Supports subtotal-based filtering to find applicable discount rules:
+        - Use max_subtotal_greater_than and min_subtotal_less_than to find rules for a specific subtotal
+        - Example: For subtotal=5000, use max_subtotal_greater_than=5000, min_subtotal_less_than=5000
+          to find rules where subtotal_greater_than <= 5000 < subtotal_less_than
         """
         variables = {
             "pageNumber": arguments.get("page_number", 1),
@@ -2380,6 +2420,12 @@ class MCPRfqProcessor:
             "itemUuid": arguments.get("item_uuid"),
             "providerItemUuid": arguments.get("provider_item_uuid"),
             "segmentUuid": arguments.get("segment_uuid"),
+            "maxSubtotalGreaterThan": arguments.get("max_subtotal_greater_than"),
+            "minSubtotalGreaterThan": arguments.get("min_subtotal_greater_than"),
+            "maxSubtotalLessThan": arguments.get("max_subtotal_less_than"),
+            "minSubtotalLessThan": arguments.get("min_subtotal_less_than"),
+            "maxDiscountPercentage": arguments.get("max_discount_percentage"),
+            "minDiscountPercentage": arguments.get("min_discount_percentage"),
             "status": "active",
         }
 
