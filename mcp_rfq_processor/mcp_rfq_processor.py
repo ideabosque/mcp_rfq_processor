@@ -257,7 +257,12 @@ MCP_CONFIGURATION = {
                         "description": "If true, add to existing quantity; if false, replace quantity (default: false)",
                     },
                 },
-                "required": ["request_uuid", "item_uuid", "provider_item_uuid", "provider_corp_external_id"],
+                "required": [
+                    "request_uuid",
+                    "item_uuid",
+                    "provider_item_uuid",
+                    "provider_corp_external_id",
+                ],
             },
         },
         {
@@ -425,7 +430,11 @@ MCP_CONFIGURATION = {
                     },
                     "notes": {"type": "string", "description": "Additional notes"},
                 },
-                "required": ["request_uuid", "provider_corp_external_id", "segment_uuid"],
+                "required": [
+                    "request_uuid",
+                    "provider_corp_external_id",
+                    "segment_uuid",
+                ],
             },
         },
         {
@@ -479,7 +488,7 @@ MCP_CONFIGURATION = {
                     "request_uuid": {
                         "type": "string",
                         "description": "UUID of the request (optional, may be required by some GraphQL schemas)",
-                    }
+                    },
                 },
                 "required": ["quote_uuid"],
             },
@@ -575,7 +584,7 @@ MCP_CONFIGURATION = {
         # Pricing Tools (3)
         {
             "name": "get_item_price_tiers",
-            "description": "Get tiered pricing for items based on quantity thresholds and customer segments. Returns applicable price tiers.",
+            "description": "Get active tiered pricing for items based on item, provider, and customer segments. Returns applicable price tiers with margin information.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -597,38 +606,14 @@ MCP_CONFIGURATION = {
                     },
                     "segment_uuid": {
                         "type": "string",
-                        "description": "Filter by customer segment",
-                    },
-                    "min_quantity_greater_then": {
-                        "type": "number",
-                        "description": "Filter by minimum quantity greater than this value",
-                    },
-                    "max_quantity_greater_then": {
-                        "type": "number",
-                        "description": "Filter by maximum quantity greater than this value",
-                    },
-                    "min_quantity_less_then": {
-                        "type": "number",
-                        "description": "Filter by minimum quantity less than this value",
-                    },
-                    "max_quantity_less_then": {
-                        "type": "number",
-                        "description": "Filter by maximum quantity less than this value",
-                    },
-                    "min_price": {
-                        "type": "number",
-                        "description": "Filter by minimum price",
-                    },
-                    "max_price": {
-                        "type": "number",
-                        "description": "Filter by maximum price",
+                        "description": "Filter by customer segment UUID",
                     },
                 },
             },
         },
         {
             "name": "get_discount_rules",
-            "description": "Get applicable discount rules based on item, segment, and date range. Returns active discount rules.",
+            "description": "Get applicable discount rules based on item, provider item, segment, and subtotal/discount thresholds. Returns discount rules with subtotal ranges and maximum discount percentages. By default, only active rules are returned.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -644,12 +629,38 @@ MCP_CONFIGURATION = {
                         "type": "string",
                         "description": "Filter by item UUID",
                     },
+                    "provider_item_uuid": {
+                        "type": "string",
+                        "description": "Filter by provider item UUID",
+                    },
                     "segment_uuid": {
                         "type": "string",
-                        "description": "Filter by customer segment",
+                        "description": "Filter by customer segment UUID",
                     },
-                    "valid_from": {"type": "string", "description": "Valid from date"},
-                    "valid_to": {"type": "string", "description": "Valid to date"},
+                    "max_subtotal_greater_than": {
+                        "type": "number",
+                        "description": "Filter rules where subtotal_greater_than is at most this value",
+                    },
+                    "min_subtotal_greater_than": {
+                        "type": "number",
+                        "description": "Filter rules where subtotal_greater_than is at least this value",
+                    },
+                    "max_subtotal_less_than": {
+                        "type": "number",
+                        "description": "Filter rules where subtotal_less_than is at most this value",
+                    },
+                    "min_subtotal_less_than": {
+                        "type": "number",
+                        "description": "Filter rules where subtotal_less_than is at least this value",
+                    },
+                    "max_discount_percentage": {
+                        "type": "number",
+                        "description": "Filter rules where max_discount_percentage is at most this value",
+                    },
+                    "min_discount_percentage": {
+                        "type": "number",
+                        "description": "Filter rules where max_discount_percentage is at least this value",
+                    },
                 },
             },
         },
@@ -2014,8 +2025,10 @@ class MCPRfqProcessor:
                 if provider_items:
                     # Filter provider_items to only include those matching the quote's provider
                     matching_provider_items = [
-                        pi for pi in provider_items
-                        if pi.get("provider_corp_external_id") == provider_corp_external_id
+                        pi
+                        for pi in provider_items
+                        if pi.get("provider_corp_external_id")
+                        == provider_corp_external_id
                     ]
 
                     if not matching_provider_items:
@@ -2028,7 +2041,9 @@ class MCPRfqProcessor:
                     for provider_item in matching_provider_items:
                         quote_item_args = {
                             "quote_uuid": quote["quote_uuid"],
-                            "provider_item_uuid": provider_item.get("provider_item_uuid"),
+                            "provider_item_uuid": provider_item.get(
+                                "provider_item_uuid"
+                            ),
                             "item_uuid": req_item.get("item_uuid"),
                             "qty": provider_item.get("qty", req_item.get("qty", 0)),
                             "segment_uuid": arguments["segment_uuid"],
@@ -2332,12 +2347,7 @@ class MCPRfqProcessor:
             "itemUuid": arguments.get("item_uuid"),
             "providerItemUuid": arguments.get("provider_item_uuid"),
             "segmentUuid": arguments.get("segment_uuid"),
-            "minQuantityGreaterThen": arguments.get("min_quantity_greater_then"),
-            "maxQuantityGreaterThen": arguments.get("max_quantity_greater_then"),
-            "minQuantityLessThen": arguments.get("min_quantity_less_then"),
-            "maxQuantityLessThen": arguments.get("max_quantity_less_then"),
-            "minPrice": arguments.get("min_price"),
-            "maxPrice": arguments.get("max_price"),
+            "status": "active",
         }
 
         variables = {k: v for k, v in variables.items() if v is not None}
@@ -2361,14 +2371,16 @@ class MCPRfqProcessor:
         """
         Get discount rules.
         Maps to GraphQL: discountRuleList query
+
+        Returns discount rules with filtering options for subtotal thresholds and discount percentages.
         """
         variables = {
             "pageNumber": arguments.get("page_number", 1),
             "limit": arguments.get("limit", 50),
             "itemUuid": arguments.get("item_uuid"),
+            "providerItemUuid": arguments.get("provider_item_uuid"),
             "segmentUuid": arguments.get("segment_uuid"),
-            "validFrom": arguments.get("valid_from"),
-            "validTo": arguments.get("valid_to"),
+            "status": "active",
         }
 
         variables = {k: v for k, v in variables.items() if v is not None}

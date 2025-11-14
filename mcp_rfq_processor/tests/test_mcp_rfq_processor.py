@@ -459,34 +459,100 @@ def test_get_provider_item_batches(mcp_rfq_processor, test_data):
 @pytest.mark.parametrize("test_data", ITEM_PRICE_TIER_LIST_TEST_DATA)
 @log_test_result
 def test_get_item_price_tiers(mcp_rfq_processor, test_data):
-    """Test getting item price tiers."""
+    """Test getting active item price tiers."""
+    # Build arguments from test data
+    arguments = {
+        "page_number": test_data.get("pageNumber", 1),
+        "limit": test_data.get("limit", 50),
+    }
+
+    # Add optional filters (basic filters only)
+    optional_fields = ["itemUuid", "providerItemUuid", "segmentUuid"]
+
+    for field in optional_fields:
+        if test_data.get(field) is not None:
+            # Convert camelCase to snake_case for Python function
+            snake_case_field = field[0].lower() + ''.join(
+                ['_' + c.lower() if c.isupper() else c for c in field[1:]]
+            )
+            arguments[snake_case_field] = test_data.get(field)
+
     result, error = _call_method(
         mcp_rfq_processor,
         "get_item_price_tiers",
-        {"item_uuid": test_data.get("itemUuid")},
+        arguments,
         "get_item_price_tiers",
     )
 
     assert error is None
     assert result is not None
     assert "total" in result
+
+    # Verify response structure
+    if "item_price_tier_list" in result or "itemPriceTierList" in result:
+        price_tiers = result.get("item_price_tier_list") or result.get("itemPriceTierList")
+        if price_tiers and len(price_tiers) > 0:
+            # Check that first tier has expected fields
+            tier = price_tiers[0]
+            assert "item_price_tier_uuid" in tier or "itemPriceTierUuid" in tier
+            # Verify status is active
+            assert tier.get("status") == "active"
+            logger.info(f"Found {len(price_tiers)} active price tier(s) with filters: {arguments}")
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("test_data", DISCOUNT_RULE_LIST_TEST_DATA)
 @log_test_result
 def test_get_discount_rules(mcp_rfq_processor, test_data):
-    """Test getting discount rules."""
+    """Test getting discount rules with various filter combinations."""
+    # Build arguments from test data
+    arguments = {
+        "page_number": test_data.get("pageNumber", 1),
+        "limit": test_data.get("limit", 50),
+    }
+
+    # Add optional filters
+    optional_fields = [
+        "itemUuid", "providerItemUuid", "segmentUuid",
+        "maxSubtotalGreaterThan", "minSubtotalGreaterThan",
+        "maxSubtotalLessThan", "minSubtotalLessThan",
+        "maxDiscountPercentage", "minDiscountPercentage"
+    ]
+
+    for field in optional_fields:
+        if test_data.get(field) is not None:
+            # Convert camelCase to snake_case for Python function
+            snake_case_field = field[0].lower() + ''.join(
+                ['_' + c.lower() if c.isupper() else c for c in field[1:]]
+            )
+            arguments[snake_case_field] = test_data.get(field)
+
     result, error = _call_method(
         mcp_rfq_processor,
         "get_discount_rules",
-        {"item_uuid": test_data.get("itemUuid")},
+        arguments,
         "get_discount_rules",
     )
 
     assert error is None
     assert result is not None
     assert "total" in result
+
+    # Verify response structure
+    if "discount_rule_list" in result or "discountRuleList" in result:
+        discount_rules = result.get("discount_rule_list") or result.get("discountRuleList")
+        if discount_rules and len(discount_rules) > 0:
+            # Check that first rule has expected fields
+            rule = discount_rules[0]
+            assert "discount_rule_uuid" in rule or "discountRuleUuid" in rule
+
+            # Verify discount rule specific fields
+            if "subtotal_greater_than" in rule or "subtotalGreaterThan" in rule:
+                logger.info(f"Discount rule has subtotal_greater_than threshold")
+            if "max_discount_percentage" in rule or "maxDiscountPercentage" in rule:
+                logger.info(f"Discount rule has max_discount_percentage limit")
+
+            logger.info(f"Found {len(discount_rules)} discount rule(s) with filters: {arguments}")
 
 
 # ============================================================================

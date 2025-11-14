@@ -214,7 +214,7 @@ Search quotes.
 ### Pricing Queries
 
 #### `itemPriceTierList`
-Get tiered pricing for items.
+Get active tiered pricing for items based on item, provider, and customer segments.
 
 **Variables:**
 ```graphql
@@ -222,15 +222,33 @@ Get tiered pricing for items.
   pageNumber: Int
   limit: Int
   itemUuid: String
+  providerItemUuid: String
   segmentUuid: String
-  minQuantity: Int
+  status: String  # Fixed to "active"
 }
 ```
 
 **Returns:** `ItemPriceTierListType`
 
+**Response Fields:**
+- `itemPriceTierList`: Array of price tiers
+  - `itemPriceTierUuid`: Unique identifier
+  - `itemUuid`: Item UUID
+  - `providerItemUuid`: Provider item UUID
+  - `segment`: Segment details (JSON)
+  - `quantityGreaterThen`: Minimum quantity threshold for this tier
+  - `quantityLessThen`: Maximum quantity threshold for this tier
+  - `marginPerUom`: Margin per unit of measure
+  - `status`: Tier status (always "active")
+  - `createdAt`: Creation timestamp
+  - `updatedAt`: Last update timestamp
+  - `updatedBy`: Last updated by user
+- `pageSize`: Items per page
+- `pageNumber`: Current page number
+- `total`: Total number of active price tiers
+
 #### `discountRuleList`
-Get discount rules.
+Get discount rules with filtering options for subtotal thresholds and discount percentages.
 
 **Variables:**
 ```graphql
@@ -238,13 +256,35 @@ Get discount rules.
   pageNumber: Int
   limit: Int
   itemUuid: String
+  providerItemUuid: String
   segmentUuid: String
-  validFrom: String
-  validTo: String
+  maxSubtotalGreaterThan: Float
+  minSubtotalGreaterThan: Float
+  maxSubtotalLessThan: Float
+  minSubtotalLessThan: Float
+  maxDiscountPercentage: Float
+  minDiscountPercentage: Float
+  status: String  # Filter by status (e.g., "active", "inreview")
 }
 ```
 
 **Returns:** `DiscountRuleListType`
+
+**Response Fields:**
+- `discountRuleList`: Array of discount rules
+  - `discountRuleUuid`: Unique identifier
+  - `providerItem`: Provider item details (JSON)
+  - `segment`: Segment details (JSON)
+  - `subtotalGreaterThan`: Minimum subtotal threshold for rule to apply
+  - `subtotalLessThan`: Maximum subtotal threshold for rule to apply
+  - `maxDiscountPercentage`: Maximum discount percentage allowed
+  - `status`: Rule status (e.g., "inreview")
+  - `createdAt`: Creation timestamp
+  - `updatedAt`: Last update timestamp
+  - `updatedBy`: Last updated by user
+- `pageSize`: Items per page
+- `pageNumber`: Current page number
+- `total`: Total number of discount rules
 
 ### Installment Queries
 
