@@ -591,13 +591,37 @@ MCP_CONFIGURATION = {
                         "type": "string",
                         "description": "Filter by item UUID",
                     },
+                    "provider_item_uuid": {
+                        "type": "string",
+                        "description": "Filter by provider item UUID",
+                    },
                     "segment_uuid": {
                         "type": "string",
                         "description": "Filter by customer segment",
                     },
-                    "min_quantity": {
-                        "type": "integer",
-                        "description": "Minimum quantity threshold",
+                    "min_quantity_greater_then": {
+                        "type": "number",
+                        "description": "Filter by minimum quantity greater than this value",
+                    },
+                    "max_quantity_greater_then": {
+                        "type": "number",
+                        "description": "Filter by maximum quantity greater than this value",
+                    },
+                    "min_quantity_less_then": {
+                        "type": "number",
+                        "description": "Filter by minimum quantity less than this value",
+                    },
+                    "max_quantity_less_then": {
+                        "type": "number",
+                        "description": "Filter by maximum quantity less than this value",
+                    },
+                    "min_price": {
+                        "type": "number",
+                        "description": "Filter by minimum price",
+                    },
+                    "max_price": {
+                        "type": "number",
+                        "description": "Filter by maximum price",
                     },
                 },
             },
@@ -2306,8 +2330,14 @@ class MCPRfqProcessor:
             "pageNumber": arguments.get("page_number", 1),
             "limit": arguments.get("limit", 50),
             "itemUuid": arguments.get("item_uuid"),
+            "providerItemUuid": arguments.get("provider_item_uuid"),
             "segmentUuid": arguments.get("segment_uuid"),
-            "minQuantity": arguments.get("min_quantity"),
+            "minQuantityGreaterThen": arguments.get("min_quantity_greater_then"),
+            "maxQuantityGreaterThen": arguments.get("max_quantity_greater_then"),
+            "minQuantityLessThen": arguments.get("min_quantity_less_then"),
+            "maxQuantityLessThen": arguments.get("max_quantity_less_then"),
+            "minPrice": arguments.get("min_price"),
+            "maxPrice": arguments.get("max_price"),
         }
 
         variables = {k: v for k, v in variables.items() if v is not None}
