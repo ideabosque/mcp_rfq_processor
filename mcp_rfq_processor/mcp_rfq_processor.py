@@ -11,6 +11,7 @@ from typing import Any, Dict
 import boto3
 import humps
 import pendulum
+
 from silvaengine_utility import Utility
 
 # Import centralized error handling utilities
@@ -742,13 +743,17 @@ MCP_CONFIGURATION = {
                         "type": "number",
                         "description": "Optional installment amount. If not provided, uses remaining balance. If provided and exceeds remaining balance, automatically capped at remaining balance. Must be > 0.",
                     },
+                    "payment_method": {
+                        "type": "string",
+                        "description": "Payment method for this installment (e.g., credit_card, bank_transfer, check, cash)",
+                    },
                     "status": {
                         "type": "string",
                         "description": "Installment status (default: pending)",
                         "enum": ["pending", "paid", "cancelled"],
                     },
                 },
-                "required": ["quote_uuid", "request_uuid"],
+                "required": ["quote_uuid", "request_uuid", "payment_method"],
             },
         },
         {
@@ -773,6 +778,10 @@ MCP_CONFIGURATION = {
                     "salesorder_no": {
                         "type": "string",
                         "description": "Sales order number to link to this installment",
+                    },
+                    "payment_method": {
+                        "type": "string",
+                        "description": "Payment method for this installment (e.g., credit_card, bank_transfer, check, cash)",
                     },
                 },
                 "required": ["quote_uuid", "installment_uuid"],
@@ -800,8 +809,18 @@ MCP_CONFIGURATION = {
                         "type": "integer",
                         "description": "Total payment period in months (e.g., 12 for one year, 24 for two years)",
                     },
+                    "payment_method": {
+                        "type": "string",
+                        "description": "Payment method for all installments (e.g., credit_card, bank_transfer, check, cash)",
+                    },
                 },
-                "required": ["quote_uuid", "request_uuid", "interval_num", "total_pay_period"],
+                "required": [
+                    "quote_uuid",
+                    "request_uuid",
+                    "interval_num",
+                    "total_pay_period",
+                    "payment_method",
+                ],
             },
         },
         {
@@ -1967,8 +1986,12 @@ class MCPRfqProcessor:
 
         if not expired_at_gt and not expired_at_lt:
             # Get default expiration filter days from settings (default: 90 days / ~3 months)
-            default_expiration_days = self.setting.get("default_batch_expiration_filter_days", 90)
-            expiration_date = datetime.now(timezone.utc) + timedelta(days=default_expiration_days)
+            default_expiration_days = self.setting.get(
+                "default_batch_expiration_filter_days", 90
+            )
+            expiration_date = datetime.now(timezone.utc) + timedelta(
+                days=default_expiration_days
+            )
             expired_at_gt = expiration_date.strftime("%Y-%m-%dT%H:%M:%S+0000")
 
         variables = {
@@ -2532,7 +2555,32 @@ class MCPRfqProcessor:
 
                 price_tiers = []
                 if not propagate_error_if_present(price_tiers_result):
-                    price_tiers = price_tiers_result.get("item_price_tier_list", [])
+                    raw_price_tiers = price_tiers_result.get("item_price_tier_list", [])
+                    # Process price tiers: set price_per_uom and remove provider_item_batches
+                    for tier in raw_price_tiers:
+                        # Get batch_no from item if present
+                        batch_no = item.get("batch_no")
+
+                        if batch_no and "provider_item_batches" in tier:
+                            # Find matching batch and use its price_per_uom
+                            for batch in tier.get("provider_item_batches", []):
+                                if batch.get("batch_no") == batch_no:
+                                    tier["price_per_uom"] = batch.get("price_per_uom")
+                                    break
+                        else:
+                            # No batch, use base_price_per_uom from provider_item
+                            if (
+                                "provider_item" in tier
+                                and "base_price_per_uom" in tier["provider_item"]
+                            ):
+                                tier["price_per_uom"] = tier["provider_item"][
+                                    "base_price_per_uom"
+                                ]
+
+                        # Remove provider_item and provider_item_batches
+                        tier.pop("provider_item", None)
+                        tier.pop("provider_item_batches", None)
+                        price_tiers.append(tier)
 
                 item_data = {
                     "provider_item_uuid": provider_item_uuid,
@@ -2543,6 +2591,7 @@ class MCPRfqProcessor:
                     "guardrail_price_per_uom": item.get("guardrail_price_per_uom"),
                     "subtotal": item.get("subtotal"),
                     "slow_move_item": item.get("slow_move_item", False),
+                    "expired_at": item.get("expired_at"),
                     "price_tiers": price_tiers,
                 }
                 items_info.append(item_data)
@@ -2558,7 +2607,12 @@ class MCPRfqProcessor:
 
             discount_rules = []
             if not propagate_error_if_present(discount_rules_result):
-                discount_rules = discount_rules_result.get("discount_rule_list", [])
+                raw_discount_rules = discount_rules_result.get("discount_rule_list", [])
+                # Remove provider_item field from each discount rule
+                discount_rules = [
+                    {k: v for k, v in rule.items() if k != "provider_item"}
+                    for rule in raw_discount_rules
+                ]
 
             group_info = {
                 "provider_corp_external_id": provider_id,
@@ -2672,32 +2726,74 @@ class MCPRfqProcessor:
                         self.logger.warning(
                             f"Provider item {provider_item_uuid} has invalid base_price_per_uom: {base_price_per_uom}"
                         )
-                        # Continue anyway, will show $0 pricing for LLM to handle
 
-                    # Get batch-specific pricing if batch_no exists
-                    guardrail_price_per_uom = base_price_per_uom
+                    # Get batch-specific data and guardrail pricing
                     slow_move_item = False
+                    expired_at = None
+                    batch_guardrail = None
 
                     if batch_no:
                         batch_result = self.get_provider_item_batches(
                             provider_item_uuid=provider_item_uuid,
-                            batch_number=batch_no,
-                            limit=1,
+                            expired_at_gt="2000-01-01T00:00:00+0000",
+                            limit=100,
                         )
 
                         if not propagate_error_if_present(batch_result):
                             batch_list = batch_result.get(
                                 "provider_item_batch_list", []
                             )
-                            if batch_list:
-                                batch_data = batch_list[0]
-                                guardrail_price_per_uom = batch_data.get(
-                                    "guardrail_price_per_uom", base_price_per_uom
-                                )
-                                slow_move_item = batch_data.get("slow_move_item", False)
+                            for batch_data in batch_list:
+                                if batch_data.get("batch_no") == batch_no:
+                                    batch_guardrail = batch_data.get(
+                                        "guardrail_price_per_uom"
+                                    )
+                                    slow_move_item = batch_data.get(
+                                        "slow_move_item", False
+                                    )
+                                    expired_at = batch_data.get("expired_at")
+                                    break
 
-                    # Calculate subtotal using base_price_per_uom
-                    price_per_uom = base_price_per_uom
+                    # Set guardrail: base_price if no batch, else min(base_price, batch_guardrail)
+                    if batch_no and batch_guardrail is not None:
+                        guardrail_price_per_uom = min(
+                            base_price_per_uom, batch_guardrail
+                        )
+                    else:
+                        guardrail_price_per_uom = base_price_per_uom
+
+                    # Get price_per_uom from matched price tier
+                    price_per_uom = base_price_per_uom  # Default fallback
+                    price_tiers_result = self.get_item_price_tiers(
+                        item_uuid=item_uuid,
+                        provider_item_uuid=provider_item_uuid,
+                        segment_uuid=segment_uuid,
+                        max_quantity_greater_then=qty,
+                        limit=1,
+                    )
+
+                    if not propagate_error_if_present(price_tiers_result):
+                        price_tier_list = price_tiers_result.get(
+                            "item_price_tier_list", []
+                        )
+                        if price_tier_list:
+                            price_tier = price_tier_list[0]
+                            # Use batch-specific price_per_uom if available; otherwise use tier price_per_uom
+                            price_per_uom = price_tier.get("price_per_uom")
+                            if batch_no and "provider_item_batches" in price_tier:
+                                # Find matching batch and use its margin_per_uom if available
+                                for batch in price_tier.get(
+                                    "provider_item_batches", []
+                                ):
+                                    if batch.get("batch_no") == batch_no:
+                                        price_per_uom = batch.get("price_per_uom")
+                                        break
+
+                    # Ensure price_per_uom is not None before calculation
+                    if price_per_uom is None:
+                        raise ValueError(
+                            f"price_per_uom cannot be None for provider item {provider_item_uuid}"
+                        )
                     subtotal = qty * price_per_uom
 
                     # Build item data
@@ -2710,6 +2806,7 @@ class MCPRfqProcessor:
                         "guardrail_price_per_uom": guardrail_price_per_uom,
                         "subtotal": subtotal,
                         "slow_move_item": slow_move_item,
+                        "expired_at": expired_at,
                     }
 
                     # Group by (provider_corp_external_id, segment_uuid)
@@ -2766,7 +2863,7 @@ class MCPRfqProcessor:
         if final_total_quote_amount is None:
             return build_error_response(
                 message=f"Quote {quote_uuid} does not have final_total_quote_amount set",
-                error_code=ErrorCode.VALIDATION_ERROR,
+                error_code=ErrorCode.VALIDATION_FAILED,
             )
 
         # Get all existing installments for the quote (to calculate priority and total)
@@ -2804,8 +2901,8 @@ class MCPRfqProcessor:
         if remaining_balance <= 0:
             return build_error_response(
                 message=f"Cannot create installment: Quote amount ({final_total_quote_amount}) is already fully covered by existing installments ({existing_total}). "
-                        f"No remaining balance available.",
-                error_code=ErrorCode.VALIDATION_ERROR,
+                f"No remaining balance available.",
+                error_code=ErrorCode.VALIDATION_FAILED,
                 details={
                     "quote_amount": final_total_quote_amount,
                     "existing_installments_total": existing_total,
@@ -2820,13 +2917,27 @@ class MCPRfqProcessor:
             if requested_amount <= 0:
                 return build_error_response(
                     message=f"Cannot create installment: Requested amount ({requested_amount}) must be greater than 0.",
-                    error_code=ErrorCode.VALIDATION_ERROR,
+                    error_code=ErrorCode.VALIDATION_FAILED,
                 )
             # Cap at remaining balance if requested amount exceeds it
             installment_amount = min(requested_amount, remaining_balance)
         else:
             # No amount provided - use full remaining balance
             installment_amount = remaining_balance
+
+        # Validate final installment amount is meaningful (greater than 0.01)
+        if installment_amount < 0.01:
+            return build_error_response(
+                message=f"Cannot create installment: Installment amount ({installment_amount}) is too small (must be at least 0.01). "
+                f"Quote amount ({final_total_quote_amount}) is already covered by existing installments ({existing_total}).",
+                error_code=ErrorCode.VALIDATION_FAILED,
+                details={
+                    "quote_amount": final_total_quote_amount,
+                    "existing_installments_total": existing_total,
+                    "remaining_balance": remaining_balance,
+                    "installment_amount": installment_amount,
+                },
+            )
 
         # Set due_date to current time
         scheduled_date = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+0000")
@@ -2840,6 +2951,10 @@ class MCPRfqProcessor:
             "status": arguments.get("status", "pending"),
             "updatedBy": "MCP",
         }
+
+        # Add optional payment_method if provided
+        if "payment_method" in arguments:
+            variables["paymentMethod"] = arguments["payment_method"]
 
         result = self._execute_graphql_query(
             "ai_rfq_graphql",
@@ -2884,6 +2999,9 @@ class MCPRfqProcessor:
         if "salesorder_no" in arguments:
             variables["salesorderNo"] = arguments["salesorder_no"]
 
+        if "payment_method" in arguments:
+            variables["paymentMethod"] = arguments["payment_method"]
+
         result = self._execute_graphql_query(
             "ai_rfq_graphql",
             "insertUpdateInstallment",
@@ -2922,14 +3040,14 @@ class MCPRfqProcessor:
         if interval_num <= 0:
             return build_error_response(
                 message=f"interval_num must be greater than 0, got: {interval_num}",
-                error_code=ErrorCode.VALIDATION_ERROR,
+                error_code=ErrorCode.VALIDATION_FAILED,
             )
 
         # Validate total_pay_period
         if total_pay_period <= 0:
             return build_error_response(
                 message=f"total_pay_period must be greater than 0, got: {total_pay_period}",
-                error_code=ErrorCode.VALIDATION_ERROR,
+                error_code=ErrorCode.VALIDATION_FAILED,
             )
 
         # Fetch quote to get final_total_quote_amount
@@ -2946,7 +3064,7 @@ class MCPRfqProcessor:
         if final_total_quote_amount is None:
             return build_error_response(
                 message=f"Quote {quote_uuid} does not have final_total_quote_amount set",
-                error_code=ErrorCode.VALIDATION_ERROR,
+                error_code=ErrorCode.VALIDATION_FAILED,
             )
 
         # Get all existing installments for the quote
@@ -2979,7 +3097,7 @@ class MCPRfqProcessor:
         if remaining_balance <= 0:
             return build_error_response(
                 message=f"Cannot create installments: Quote amount ({final_total_quote_amount}) is already fully covered by existing installments ({existing_total}).",
-                error_code=ErrorCode.VALIDATION_ERROR,
+                error_code=ErrorCode.VALIDATION_FAILED,
                 details={
                     "quote_amount": final_total_quote_amount,
                     "existing_installments_total": existing_total,
@@ -2990,6 +3108,21 @@ class MCPRfqProcessor:
         # Calculate installment amount per installment
         installment_amount_per = remaining_balance / interval_num
 
+        # Validate each installment amount is meaningful (greater than 0.01)
+        if installment_amount_per < 0.01:
+            return build_error_response(
+                message=f"Cannot create installments: Each installment amount ({installment_amount_per}) is too small (must be at least 0.01). "
+                f"Remaining balance ({remaining_balance}) divided by {interval_num} installments results in amounts too small to process.",
+                error_code=ErrorCode.VALIDATION_FAILED,
+                details={
+                    "quote_amount": final_total_quote_amount,
+                    "existing_installments_total": existing_total,
+                    "remaining_balance": remaining_balance,
+                    "interval_num": interval_num,
+                    "installment_amount_per": installment_amount_per,
+                },
+            )
+
         # Calculate interval in months (total_pay_period / interval_num)
         months_per_interval = total_pay_period / interval_num
 
@@ -2999,6 +3132,7 @@ class MCPRfqProcessor:
         # Create installments
         created_installments = []
         current_time = pendulum.now("UTC")
+        total_allocated = 0.0
 
         for i in range(1, interval_num + 1):
             # Calculate scheduled date for this installment using pendulum
@@ -3011,7 +3145,9 @@ class MCPRfqProcessor:
             # Set to the configured day of month (e.g., 15th)
             # Handle edge case where day doesn't exist in target month (e.g., Feb 30)
             try:
-                scheduled_datetime = scheduled_datetime.set(day=installment_scheduled_day)
+                scheduled_datetime = scheduled_datetime.set(
+                    day=installment_scheduled_day
+                )
             except ValueError:
                 # If day doesn't exist (e.g., 31st in Feb), use last day of month
                 scheduled_datetime = scheduled_datetime.end_of("month").start_of("day")
@@ -3022,16 +3158,27 @@ class MCPRfqProcessor:
             # Set priority (i starts from 1, so i=1 gives max_priority+1, i=2 gives max_priority+2, etc.)
             new_priority = max_priority + i
 
+            # For the last installment, use remaining balance to avoid rounding errors
+            if i == interval_num:
+                current_installment_amount = float(remaining_balance) - total_allocated
+            else:
+                current_installment_amount = float(installment_amount_per)
+                total_allocated += float(installment_amount_per)
+
             # Create installment
             variables = {
                 "quoteUuid": quote_uuid,
                 "requestUuid": request_uuid,
                 "priority": new_priority,
                 "scheduledDate": scheduled_date,
-                "installmentAmount": installment_amount_per,
+                "installmentAmount": current_installment_amount,
                 "status": "pending",
                 "updatedBy": "MCP",
             }
+
+            # Add optional payment_method if provided
+            if "payment_method" in arguments:
+                variables["paymentMethod"] = arguments["payment_method"]
 
             result = self._execute_graphql_query(
                 "ai_rfq_graphql",
@@ -3053,7 +3200,9 @@ class MCPRfqProcessor:
                     },
                 )
 
-            installment = humps.decamelize(result["insertUpdateInstallment"]["installment"])
+            installment = humps.decamelize(
+                result["insertUpdateInstallment"]["installment"]
+            )
             created_installments.append(installment)
 
         return {

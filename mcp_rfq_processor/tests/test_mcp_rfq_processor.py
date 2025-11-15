@@ -61,6 +61,7 @@ sys.path.insert(0, os.path.join(base_dir, "mcp_rfq_processor"))
 sys.path.insert(0, os.path.join(base_dir, "ai_rfq_engine"))
 
 from mcp_rfq_processor.mcp_rfq_processor import MCPRfqProcessor
+from silvaengine_utility import Utility
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -93,7 +94,7 @@ def _call_method(
         result = method(**arguments)
         elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
         logger.info(
-            f"Method response: cid={cid} op={op} elapsed_ms={elapsed_ms} success=True result={result}"
+            f"Method response: cid={cid} op={op} elapsed_ms={elapsed_ms} success=True result={Utility.json_dumps(result)}"
         )
         return result, None
     except Exception as exc:
@@ -1264,13 +1265,16 @@ def test_calculate_quote_pricing(mcp_rfq_processor, test_data):
     result, error = _call_method(
         mcp_rfq_processor,
         "calculate_quote_pricing",
-        {"quote_uuid": test_data.get("quoteUuid")},
+        {
+            "request_uuid": test_data.get("requestUuid"),
+            "segment_uuid": test_data.get("segmentUuid"),
+        },
         "calculate_quote_pricing",
     )
 
     assert error is None
     assert result is not None
-    assert "quote_uuid" in result
+    assert "request_uuid" in result
 
 
 @pytest.mark.integration
@@ -1330,14 +1334,20 @@ def test_remove_quote_item(mcp_rfq_processor, test_data):
 @log_test_result
 def test_create_installment(mcp_rfq_processor, test_data):
     """Test creating installment with auto amount and due_date."""
+    arguments = {
+        "request_uuid": test_data.get("requestUuid"),
+        "quote_uuid": test_data.get("quoteUuid"),
+        "status": test_data.get("status", "pending"),
+    }
+
+    # Add optional payment_method if present
+    if test_data.get("paymentMethod") is not None:
+        arguments["payment_method"] = test_data.get("paymentMethod")
+
     result, error = _call_method(
         mcp_rfq_processor,
         "create_installment",
-        {
-            "request_uuid": test_data.get("requestUuid"),
-            "quote_uuid": test_data.get("quoteUuid"),
-            "status": test_data.get("status", "pending"),
-        },
+        arguments,
         "create_installment",
     )
 
@@ -1383,6 +1393,8 @@ def test_update_installment(mcp_rfq_processor, test_data):
     if test_data.get("salesorderNo") is not None:
         # Convert camelCase to snake_case
         arguments["salesorder_no"] = test_data.get("salesorderNo")
+    if test_data.get("paymentMethod") is not None:
+        arguments["payment_method"] = test_data.get("paymentMethod")
 
     result, error = _call_method(
         mcp_rfq_processor,
@@ -1410,6 +1422,10 @@ def test_create_installments(mcp_rfq_processor, test_data):
         "total_pay_period": test_data.get("totalPayPeriod"),
     }
 
+    # Add optional payment_method if present
+    if test_data.get("paymentMethod") is not None:
+        arguments["payment_method"] = test_data.get("paymentMethod")
+
     result, error = _call_method(
         mcp_rfq_processor,
         "create_installments",
@@ -1430,9 +1446,19 @@ def test_create_installments(mcp_rfq_processor, test_data):
         scheduled_date = first_installment.get("scheduled_date")
         if scheduled_date:
             # Parse scheduled date and verify it's in the future
-            scheduled_dt = pendulum.parse(scheduled_date)
+            # If scheduled_date is already a DateTime object, use it directly
+            if isinstance(scheduled_date, str):
+                scheduled_dt = pendulum.parse(scheduled_date)
+            else:
+                # Convert DateTime object to pendulum (ensure it's timezone aware)
+                scheduled_dt = pendulum.instance(scheduled_date)
+                if scheduled_dt.timezone is None or scheduled_dt.timezone.name == "UTC":
+                    # Make sure it's UTC aware
+                    scheduled_dt = scheduled_dt.in_timezone("UTC")
             current_dt = pendulum.now("UTC")
-            assert scheduled_dt > current_dt, "First installment should be scheduled in the future"
+            assert (
+                scheduled_dt > current_dt
+            ), "First installment should be scheduled in the future"
 
 
 # ============================================================================

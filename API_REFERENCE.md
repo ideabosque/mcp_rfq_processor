@@ -574,6 +574,7 @@ Create or update payment installment.
   installmentNumber: Int!
   dueDate: String!
   amount: Float!
+  paymentMethod: String
   status: String
   updatedBy: String!
 }
@@ -956,6 +957,7 @@ mutation {
     installmentNumber: 1,
     dueDate: "2025-12-01",
     amount: 2293.75,
+    paymentMethod: "bank_transfer",
     status: "pending",
     updatedBy: "MCP"
   ) {
@@ -963,6 +965,7 @@ mutation {
       installmentUuid
       installmentNumber
       amount
+      paymentMethod
       installmentRatio  # Auto-calculated by backend
     }
   }
