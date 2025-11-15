@@ -1309,6 +1309,7 @@ def test_create_installment(mcp_rfq_processor, test_data):
         mcp_rfq_processor,
         "create_installment",
         {
+            "request_uuid": test_data.get("requestUuid"),
             "quote_uuid": test_data.get("quoteUuid"),
             "installment_number": test_data.get("priority", 1),
             "due_date": test_data.get("scheduledDate"),
