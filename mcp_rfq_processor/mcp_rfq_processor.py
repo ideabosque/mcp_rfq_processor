@@ -3000,9 +3000,9 @@ class MCPRfqProcessor:
         created_installments = []
         current_time = pendulum.now("UTC")
 
-        for i in range(interval_num):
+        for i in range(1, interval_num + 1):
             # Calculate scheduled date for this installment using pendulum
-            # Add months_per_interval * i months to current time
+            # Add months_per_interval * i months to current time (starts from 1st interval)
             months_to_add = int(months_per_interval * i)
 
             # Start with current time and add months
@@ -3019,8 +3019,8 @@ class MCPRfqProcessor:
             # Format as ISO 8601 with UTC timezone
             scheduled_date = scheduled_datetime.format("YYYY-MM-DDTHH:mm:ssZ")
 
-            # Set priority
-            new_priority = max_priority + 1 + i
+            # Set priority (i starts from 1, so i=1 gives max_priority+1, i=2 gives max_priority+2, etc.)
+            new_priority = max_priority + i
 
             # Create installment
             variables = {
