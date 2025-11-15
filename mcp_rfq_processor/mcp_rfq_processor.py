@@ -371,7 +371,7 @@ MCP_CONFIGURATION = {
         },
         {
             "name": "get_provider_item_batches",
-            "description": "Get batch/lot information for provider items including slow_move_item flag and guardrail pricing. Useful for tracking inventory batches, lot numbers, and identifying slow-moving inventory that may need special pricing.",
+            "description": "Get batch/lot information for provider items including slow_move_item flag and guardrail pricing. Useful for tracking inventory batches, lot numbers, and identifying slow-moving inventory that may need special pricing. If neither expired_at_gt nor expired_at_lt is provided, defaults to filtering batches expiring 3+ months from now.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -387,9 +387,25 @@ MCP_CONFIGURATION = {
                         "type": "string",
                         "description": "Filter by provider item UUID",
                     },
-                    "batch_number": {
+                    "item_uuid": {
                         "type": "string",
-                        "description": "Filter by batch number",
+                        "description": "Filter by item UUID",
+                    },
+                    "expired_at_gt": {
+                        "type": "string",
+                        "description": "Filter batches with expiration date greater than this ISO 8601 datetime",
+                    },
+                    "expired_at_lt": {
+                        "type": "string",
+                        "description": "Filter batches with expiration date less than this ISO 8601 datetime",
+                    },
+                    "slow_move_item": {
+                        "type": "boolean",
+                        "description": "Filter by slow-moving inventory flag (default: false)",
+                    },
+                    "in_stock": {
+                        "type": "boolean",
+                        "description": "Filter by in-stock status (default: true)",
                     },
                 },
             },
@@ -1889,12 +1905,31 @@ class MCPRfqProcessor:
         - slow_move_item: Boolean flag indicating slow-moving inventory
         - guardrail_price_per_uom: Minimum acceptable price for profitability
         - Batch details: expired_at, produced_at, cost breakdown
+
+        Note: If neither expired_at_gt nor expired_at_lt is provided, defaults to
+        filtering batches expiring 3+ months from now (expired_at_gt = current_time + 3 months)
         """
+        from datetime import datetime, timedelta, timezone
+
+        # Set default expired_at_gt based on configured days if no expiration filters provided
+        expired_at_gt = arguments.get("expired_at_gt")
+        expired_at_lt = arguments.get("expired_at_lt")
+
+        if not expired_at_gt and not expired_at_lt:
+            # Get default expiration filter days from settings (default: 90 days / ~3 months)
+            default_expiration_days = self.setting.get("default_batch_expiration_filter_days", 90)
+            expiration_date = datetime.now(timezone.utc) + timedelta(days=default_expiration_days)
+            expired_at_gt = expiration_date.strftime("%Y-%m-%dT%H:%M:%S+0000")
+
         variables = {
             "pageNumber": arguments.get("page_number", 1),
             "limit": arguments.get("limit", 50),
             "providerItemUuid": arguments.get("provider_item_uuid"),
-            "batchNumber": arguments.get("batch_number"),
+            "itemUuid": arguments.get("item_uuid"),
+            "expiredAtGt": expired_at_gt,
+            "expiredAtLt": expired_at_lt,
+            "slowMoveItem": arguments.get("slow_move_item", False),
+            "inStock": arguments.get("in_stock", True),
         }
 
         variables = {k: v for k, v in variables.items() if v is not None}
@@ -2417,7 +2452,9 @@ class MCPRfqProcessor:
             }
 
         # Step 2: Extract and group provider_items by (provider_corp_external_id, segment_uuid)
-        grouped_items = self._group_provider_items_from_request(request_items, segment_uuid)
+        grouped_items = self._group_provider_items_from_request(
+            request_items, segment_uuid
+        )
 
         # Step 4: Build output structure with discount rules and price tiers
         pricing_groups = []
@@ -2440,7 +2477,7 @@ class MCPRfqProcessor:
                     provider_item_uuid=provider_item_uuid,
                     segment_uuid=seg_uuid,
                     max_quantity_greater_then=item_qty,  # Tiers where qty_greater_then <= item_qty
-                    limit=50
+                    limit=50,
                 )
 
                 price_tiers = []
@@ -2466,7 +2503,7 @@ class MCPRfqProcessor:
                 segment_uuid=seg_uuid,
                 max_subtotal_greater_than=group_subtotal,
                 min_subtotal_less_than=group_subtotal,
-                limit=50
+                limit=50,
             )
 
             discount_rules = []
@@ -2559,8 +2596,7 @@ class MCPRfqProcessor:
                 # Fetch provider item details for pricing
                 try:
                     provider_items_result = self.get_provider_items(
-                        provider_item_uuid=provider_item_uuid,
-                        limit=1
+                        provider_item_uuid=provider_item_uuid, limit=1
                     )
 
                     if error := propagate_error_if_present(provider_items_result):
@@ -2569,7 +2605,9 @@ class MCPRfqProcessor:
                         )
                         continue
 
-                    provider_items_list = provider_items_result.get("provider_item_list", [])
+                    provider_items_list = provider_items_result.get(
+                        "provider_item_list", []
+                    )
                     if not provider_items_list:
                         self.logger.warning(
                             f"Provider item {provider_item_uuid} not found"
@@ -2586,7 +2624,6 @@ class MCPRfqProcessor:
                         )
                         # Continue anyway, will show $0 pricing for LLM to handle
 
-
                     # Get batch-specific pricing if batch_no exists
                     guardrail_price_per_uom = base_price_per_uom
                     slow_move_item = False
@@ -2595,11 +2632,13 @@ class MCPRfqProcessor:
                         batch_result = self.get_provider_item_batches(
                             provider_item_uuid=provider_item_uuid,
                             batch_number=batch_no,
-                            limit=1
+                            limit=1,
                         )
 
                         if not propagate_error_if_present(batch_result):
-                            batch_list = batch_result.get("provider_item_batch_list", [])
+                            batch_list = batch_result.get(
+                                "provider_item_batch_list", []
+                            )
                             if batch_list:
                                 batch_data = batch_list[0]
                                 guardrail_price_per_uom = batch_data.get(

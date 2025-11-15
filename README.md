@@ -107,10 +107,21 @@ processor = MCPRfqProcessor(
     aws_access_key_id="your-access-key",
     aws_secret_access_key="your-secret-key",
     execute_mode="aws_lambda",  # or "local" for testing
+    default_batch_expiration_filter_days=90,  # Default: 90 days (~3 months)
 )
 
 processor.endpoint_id = "your-endpoint-id"
 ```
+
+**Configuration Options:**
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `region_name` | string | - | AWS region where Lambda functions are deployed |
+| `aws_access_key_id` | string | - | AWS access key ID |
+| `aws_secret_access_key` | string | - | AWS secret access key |
+| `execute_mode` | string | - | Execution mode: `aws_lambda` or `local` |
+| `default_batch_expiration_filter_days` | integer | 90 | Default minimum expiration days for `get_provider_item_batches`. When no expiration filters are provided, only returns batches expiring this many days or more in the future. |
 
 ## Available MCP Tools
 

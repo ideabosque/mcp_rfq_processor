@@ -405,11 +405,34 @@ def test_get_provider_items(mcp_rfq_processor, test_data):
 @pytest.mark.parametrize("test_data", PROVIDER_ITEM_BATCH_LIST_TEST_DATA)
 @log_test_result
 def test_get_provider_item_batches(mcp_rfq_processor, test_data):
-    """Test getting provider item batches."""
+    """Test getting provider item batches with filtering."""
+    # Build arguments from test data
+    arguments = {
+        "page_number": test_data.get("pageNumber", 1),
+        "limit": test_data.get("limit", 50),
+    }
+
+    # Add optional filters
+    optional_fields = [
+        "providerItemUuid",
+        "itemUuid",
+        "expiredAtGt",
+        "expiredAtLt",
+        "slowMoveItem",
+        "inStock",
+    ]
+    for field in optional_fields:
+        if test_data.get(field) is not None:
+            # Convert camelCase to snake_case for Python function
+            snake_case_field = field[0].lower() + "".join(
+                ["_" + c.lower() if c.isupper() else c for c in field[1:]]
+            )
+            arguments[snake_case_field] = test_data.get(field)
+
     result, error = _call_method(
         mcp_rfq_processor,
         "get_provider_item_batches",
-        {"provider_item_uuid": test_data.get("providerItemUuid")},
+        arguments,
         "get_provider_item_batches",
     )
 
