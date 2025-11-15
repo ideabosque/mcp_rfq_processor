@@ -1401,6 +1401,8 @@ def test_update_installment(mcp_rfq_processor, test_data):
 @log_test_result
 def test_create_installments(mcp_rfq_processor, test_data):
     """Test creating multiple installments based on payment schedule."""
+    import pendulum
+
     arguments = {
         "quote_uuid": test_data.get("quoteUuid"),
         "request_uuid": test_data.get("requestUuid"),
@@ -1421,6 +1423,16 @@ def test_create_installments(mcp_rfq_processor, test_data):
     assert "total_created" in result
     assert result["total_created"] == test_data.get("intervalNum")
     assert len(result["installments"]) == test_data.get("intervalNum")
+
+    # Verify first installment is scheduled in the future (not current period)
+    if result["installments"]:
+        first_installment = result["installments"][0]
+        scheduled_date = first_installment.get("scheduled_date")
+        if scheduled_date:
+            # Parse scheduled date and verify it's in the future
+            scheduled_dt = pendulum.parse(scheduled_date)
+            current_dt = pendulum.now("UTC")
+            assert scheduled_dt > current_dt, "First installment should be scheduled in the future"
 
 
 # ============================================================================

@@ -636,7 +636,7 @@ Create multiple payment installments for a quote based on a payment schedule. Au
 
 **Automatic Behavior:**
 - **Amount per installment**: `remaining_balance / interval_num` (equal distribution)
-- **Scheduled dates**: Calculated using current time + interval spacing (months), scheduled on the configured day of month (default: 15th). Uses `installment_scheduled_day` setting. If the day doesn't exist in a month (e.g., Feb 31), uses the last day of that month.
+- **Scheduled dates**: First installment scheduled for the next payment period (not current period), then subsequent installments follow at regular intervals. All scheduled on the configured day of month (default: 15th) using `installment_scheduled_day` setting. If the day doesn't exist in a month (e.g., Feb 31), uses the last day of that month. Uses pendulum library for accurate date calculations.
 - **Priority**: Auto-increments sequentially for each installment
 - **Status**: All installments created with `pending` status
 
@@ -661,6 +661,8 @@ Create multiple payment installments for a quote based on a payment schedule. Au
   "total_pay_period": 12
 }
 // Creates 12 installments, scheduled monthly (every 1 month)
+// First installment: Next month on 15th (or configured day)
+// Last installment: 12 months from now on 15th
 // Amount per installment: remaining_balance / 12
 ```
 
@@ -673,6 +675,8 @@ Create multiple payment installments for a quote based on a payment schedule. Au
   "total_pay_period": 12
 }
 // Creates 6 installments, scheduled bi-monthly (every 2 months)
+// First installment: 2 months from now on 15th
+// Last installment: 12 months from now on 15th
 // Amount per installment: remaining_balance / 6
 ```
 
@@ -685,6 +689,8 @@ Create multiple payment installments for a quote based on a payment schedule. Au
   "total_pay_period": 24
 }
 // Creates 4 installments, scheduled every 6 months
+// First installment: 6 months from now on 15th
+// Last installment: 24 months from now on 15th
 // Amount per installment: remaining_balance / 4
 ```
 
