@@ -725,7 +725,7 @@ MCP_CONFIGURATION = {
         # Installment Tools (2)
         {
             "name": "create_installment",
-            "description": "Create payment installment for a quote. If installment_amount not provided, uses remaining balance (final_total_quote_amount - existing_installments_total). If provided, uses the lesser of requested amount or remaining balance (auto-caps). Sets due_date to current time. Typically created when quote status changes to 'confirmed'. Returns created installment details.",
+            "description": "Create payment installment for a quote. If installment_amount not provided, uses remaining balance (final_total_quote_amount - existing_installments_total). If provided, uses the lesser of requested amount or remaining balance (auto-caps). Priority auto-increments based on existing installments. Sets due_date to current time. Typically created when quote status changes to 'confirmed'. Returns created installment details.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2707,21 +2707,33 @@ class MCPRfqProcessor:
                 error_code=ErrorCode.VALIDATION_ERROR,
             )
 
-        # Check existing installments to ensure total doesn't exceed quote amount
-        existing_installments_result = self.get_installments(
+        # Get all existing installments for the quote (to calculate priority and total)
+        all_installments_result = self.get_installments(
             quote_uuid=quote_uuid,
-            statuses=["pending", "paid"],
             limit=100,  # Get all installments
         )
 
-        if error := propagate_error_if_present(existing_installments_result):
+        if error := propagate_error_if_present(all_installments_result):
             return error
 
-        # Calculate total of existing pending/paid installments
+        # Calculate total of pending/paid installments and find max priority across all
         existing_total = 0
-        installment_list = existing_installments_result.get("installment_list", [])
-        for inst in installment_list:
-            existing_total += inst.get("installment_amount", 0)
+        max_priority = -1  # Start with -1 so first installment gets priority 0
+        all_installment_list = all_installments_result.get("installment_list", [])
+
+        for inst in all_installment_list:
+            # Only count pending/paid installments toward total
+            inst_status = inst.get("status", "")
+            if inst_status in ["pending", "paid"]:
+                existing_total += inst.get("installment_amount", 0)
+
+            # Track highest priority across ALL installments (including cancelled)
+            priority = inst.get("priority", 0)
+            if priority is not None and priority > max_priority:
+                max_priority = priority
+
+        # Set new installment priority to max + 1
+        new_priority = max_priority + 1
 
         # Calculate remaining balance
         remaining_balance = final_total_quote_amount - existing_total
@@ -2760,6 +2772,7 @@ class MCPRfqProcessor:
         variables = {
             "quoteUuid": quote_uuid,
             "requestUuid": request_uuid,
+            "priority": new_priority,
             "scheduledDate": scheduled_date,
             "installmentAmount": installment_amount,
             "status": arguments.get("status", "pending"),

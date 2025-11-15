@@ -536,6 +536,7 @@ Set up a payment installment for a quote.
 
 **Automatic Behavior:**
 - **Amount**: If `installment_amount` not provided, uses full remaining balance. If provided, uses `min(requested_amount, remaining_balance)` (auto-caps at remaining balance)
+- **Priority**: Automatically set to `max(existing_priorities) + 1` for sequential ordering (starts at 0 for first installment)
 - **Due Date**: Automatically sets to current time (no need to specify)
 - **installment_ratio**: Auto-calculated by backend based on `installment_amount` / `final_total_quote_amount`
 - **Auto-Capping**: Requested amount > remaining balance automatically uses remaining balance instead
