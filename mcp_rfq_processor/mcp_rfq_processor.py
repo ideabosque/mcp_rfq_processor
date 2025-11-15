@@ -722,7 +722,7 @@ MCP_CONFIGURATION = {
                 "required": ["request_uuid", "segment_uuid"],
             },
         },
-        # Installment Tools (2)
+        # Installment Tools (3)
         {
             "name": "create_installment",
             "description": "Create payment installment for a quote. If installment_amount not provided, uses remaining balance (final_total_quote_amount - existing_installments_total). If provided, uses the lesser of requested amount or remaining balance (auto-caps). Priority auto-increments based on existing installments. Sets due_date to current time. Typically created when quote status changes to 'confirmed'. Returns created installment details.",
@@ -748,6 +748,33 @@ MCP_CONFIGURATION = {
                     },
                 },
                 "required": ["quote_uuid", "request_uuid"],
+            },
+        },
+        {
+            "name": "update_installment",
+            "description": "Update installment status and sales order number. Used to mark installments as paid or cancelled, and to link them to sales orders. Returns updated installment details.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "quote_uuid": {
+                        "type": "string",
+                        "description": "UUID of the quote",
+                    },
+                    "installment_uuid": {
+                        "type": "string",
+                        "description": "UUID of the installment to update",
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Installment status",
+                        "enum": ["pending", "paid", "cancelled"],
+                    },
+                    "salesorder_no": {
+                        "type": "string",
+                        "description": "Sales order number to link to this installment",
+                    },
+                },
+                "required": ["quote_uuid", "installment_uuid"],
             },
         },
         {
@@ -1023,6 +1050,14 @@ MCP_CONFIGURATION = {
             "module_name": "mcp_rfq_processor",
             "class_name": "MCPRfqProcessor",
             "function_name": "create_installment",
+            "return_type": "text",
+        },
+        {
+            "type": "tool",
+            "name": "update_installment",
+            "module_name": "mcp_rfq_processor",
+            "class_name": "MCPRfqProcessor",
+            "function_name": "update_installment",
             "return_type": "text",
         },
         {
@@ -2778,6 +2813,49 @@ class MCPRfqProcessor:
             "status": arguments.get("status", "pending"),
             "updatedBy": "MCP",
         }
+
+        result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "insertUpdateInstallment",
+            "Mutation",
+            variables,
+        )
+
+        # Check for error in response and propagate if present
+        if error := propagate_error_if_present(result):
+            return error
+
+        installment = humps.decamelize(result["insertUpdateInstallment"]["installment"])
+
+        return installment
+
+    # * MCP Function.
+    @handle_errors(operation_name="update installment")
+    def update_installment(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Update installment status and sales order number.
+        Maps to GraphQL: insertUpdateInstallment mutation
+
+        Used to:
+        - Mark installment as paid when payment is received
+        - Mark installment as cancelled if needed
+        - Link installment to sales order number
+        """
+        self.logger.info(f"Updating installment: {arguments}")
+
+        # Build variables - only include fields that are provided
+        variables = {
+            "quoteUuid": arguments["quote_uuid"],
+            "installmentUuid": arguments["installment_uuid"],
+            "updatedBy": "MCP",
+        }
+
+        # Add optional fields if provided
+        if "status" in arguments:
+            variables["status"] = arguments["status"]
+
+        if "salesorder_no" in arguments:
+            variables["salesorderNo"] = arguments["salesorder_no"]
 
         result = self._execute_graphql_query(
             "ai_rfq_graphql",

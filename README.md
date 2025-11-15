@@ -14,7 +14,7 @@ The MCP RFQ Processor connects AI assistants to the `ai_rfq_engine` GraphQL back
 - **Segment Management**: Organize customers and providers into pricing segments
 
 **Current Version**: 0.1.1  
-**Total MCP Tools**: 25 (fully implemented and tested)
+**Total MCP Tools**: 26 (fully implemented and tested)
 
 ### What's New in v0.1.1
 
@@ -524,7 +524,7 @@ Get applicable discount rules.
 
 ---
 
-### 5. Installment Management (2 tools)
+### 5. Installment Management (3 tools)
 
 #### `create_installment`
 Set up a payment installment for a quote.
@@ -576,6 +576,51 @@ Set up a payment installment for a quote.
 - Auto-capping ensures you can never exceed quote total (safe to request any amount)
 
 **Output:** Installment record with auto-calculated amount, due_date, and installment_ratio.
+
+#### `update_installment`
+Update installment status and sales order number.
+
+**Use Cases:**
+- Mark installment as `paid` when payment is received
+- Mark installment as `cancelled` if payment is cancelled or refunded
+- Link installment to a sales order number for tracking
+
+**Input:**
+```json
+{
+  "quote_uuid": "quote-uuid",
+  "installment_uuid": "installment-uuid",
+  "status": "paid",
+  "salesorder_no": "SO-12345"
+}
+```
+
+**Common Usage:**
+```json
+// Mark as paid
+{
+  "quote_uuid": "quote-uuid",
+  "installment_uuid": "installment-uuid",
+  "status": "paid"
+}
+
+// Link to sales order
+{
+  "quote_uuid": "quote-uuid",
+  "installment_uuid": "installment-uuid",
+  "salesorder_no": "SO-12345"
+}
+
+// Both at once
+{
+  "quote_uuid": "quote-uuid",
+  "installment_uuid": "installment-uuid",
+  "status": "paid",
+  "salesorder_no": "SO-12345"
+}
+```
+
+**Output:** Updated installment record.
 
 #### `get_installments`
 Retrieve installments for a quote.
