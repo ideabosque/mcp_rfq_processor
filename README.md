@@ -538,6 +538,7 @@ Set up a payment installment for a quote.
 - **Amount**: Automatically uses the quote's `final_total_quote_amount` (no need to specify)
 - **Due Date**: Automatically sets to current time (no need to specify)
 - **installment_ratio**: Auto-calculated by backend based on `installment_amount` / `final_total_quote_amount`
+- **Validation**: Checks existing pending/paid installments to ensure total doesn't exceed quote amount
 
 **Input (Simplified):**
 ```json
@@ -552,6 +553,11 @@ Set up a payment installment for a quote.
 - `pending`: Payment scheduled but not yet received (default when quote is confirmed)
 - `paid`: Payment has been received and verified
 - `cancelled`: Payment was cancelled or refunded
+
+**Validation Rules:**
+- The sum of all existing `pending` and `paid` installments plus the new installment cannot exceed the quote's `final_total_quote_amount`
+- Cancelled installments are not counted in the total
+- If validation fails, an error is returned with details about existing installments
 
 **Output:** Installment record with auto-calculated amount, due_date, and installment_ratio.
 

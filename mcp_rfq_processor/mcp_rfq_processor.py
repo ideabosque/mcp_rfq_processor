@@ -725,7 +725,7 @@ MCP_CONFIGURATION = {
         # Installment Tools (2)
         {
             "name": "create_installment",
-            "description": "Create payment installment for a quote. Automatically uses the quote's final_total_quote_amount and sets due_date to current time if not provided. Typically created when quote status changes to 'confirmed'. Returns created installment details.",
+            "description": "Create payment installment for a quote. Automatically uses the quote's final_total_quote_amount and sets due_date to current time. Validates that total pending/paid installments don't exceed quote amount. Typically created when quote status changes to 'confirmed'. Returns created installment details.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2696,15 +2696,49 @@ class MCPRfqProcessor:
             return error
 
         # Get the quote amount
-        installment_amount = quote_result.get("final_total_quote_amount")
-        if installment_amount is None:
+        final_total_quote_amount = quote_result.get("final_total_quote_amount")
+        if final_total_quote_amount is None:
             return build_error_response(
                 message=f"Quote {quote_uuid} does not have final_total_quote_amount set",
                 error_code=ErrorCode.VALIDATION_ERROR,
             )
 
-        # Set due_date to current time if not provided
+        # Check existing installments to ensure total doesn't exceed quote amount
+        existing_installments_result = self.get_installments(
+            quote_uuid=quote_uuid,
+            statuses=["pending", "paid"],
+            limit=100,  # Get all installments
+        )
+
+        if error := propagate_error_if_present(existing_installments_result):
+            return error
+
+        # Calculate total of existing pending/paid installments
+        existing_total = 0
+        installment_list = existing_installments_result.get("installment_list", [])
+        for inst in installment_list:
+            existing_total += inst.get("installment_amount", 0)
+
+        # Validate that adding new installment won't exceed quote total
+        new_installment_amount = final_total_quote_amount
+        total_with_new = existing_total + new_installment_amount
+
+        if total_with_new > final_total_quote_amount:
+            return build_error_response(
+                message=f"Cannot create installment: Total installments ({total_with_new}) would exceed quote amount ({final_total_quote_amount}). "
+                        f"Existing pending/paid installments total: {existing_total}",
+                error_code=ErrorCode.VALIDATION_ERROR,
+                details={
+                    "quote_amount": final_total_quote_amount,
+                    "existing_installments_total": existing_total,
+                    "new_installment_amount": new_installment_amount,
+                    "total_with_new": total_with_new,
+                },
+            )
+
+        # Set due_date to current time
         scheduled_date = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+0000")
+        installment_amount = new_installment_amount
 
         variables = {
             "quoteUuid": quote_uuid,
