@@ -535,10 +535,10 @@ Set up a payment installment for a quote.
 - When all installments are `paid`, update quote status to `completed`
 
 **Automatic Behavior:**
-- **Amount**: Automatically uses the quote's `final_total_quote_amount` (no need to specify)
+- **Amount**: Automatically calculates as `final_total_quote_amount - existing_installments_total` (remaining balance)
 - **Due Date**: Automatically sets to current time (no need to specify)
 - **installment_ratio**: Auto-calculated by backend based on `installment_amount` / `final_total_quote_amount`
-- **Validation**: Checks existing pending/paid installments to ensure total doesn't exceed quote amount
+- **Validation**: Ensures remaining balance is available before creating installment
 
 **Input (Simplified):**
 ```json
@@ -555,9 +555,11 @@ Set up a payment installment for a quote.
 - `cancelled`: Payment was cancelled or refunded
 
 **Validation Rules:**
-- The sum of all existing `pending` and `paid` installments plus the new installment cannot exceed the quote's `final_total_quote_amount`
+- New installment amount is calculated as: `final_total_quote_amount - existing_pending_paid_total`
+- If the remaining balance is ≤ 0 (quote fully covered), installment creation is blocked
 - Cancelled installments are not counted in the total
-- If validation fails, an error is returned with details about existing installments
+- Each installment fills the remaining balance at the time of creation
+- If validation fails, an error is returned with details about remaining balance
 
 **Output:** Installment record with auto-calculated amount, due_date, and installment_ratio.
 

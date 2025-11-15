@@ -725,7 +725,7 @@ MCP_CONFIGURATION = {
         # Installment Tools (2)
         {
             "name": "create_installment",
-            "description": "Create payment installment for a quote. Automatically uses the quote's final_total_quote_amount and sets due_date to current time. Validates that total pending/paid installments don't exceed quote amount. Typically created when quote status changes to 'confirmed'. Returns created installment details.",
+            "description": "Create payment installment for a quote. Automatically calculates amount as remaining balance (final_total_quote_amount - existing_installments_total) and sets due_date to current time. Validates remaining balance is available. Typically created when quote status changes to 'confirmed'. Returns created installment details.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2719,20 +2719,20 @@ class MCPRfqProcessor:
         for inst in installment_list:
             existing_total += inst.get("installment_amount", 0)
 
-        # Validate that adding new installment won't exceed quote total
-        new_installment_amount = final_total_quote_amount
-        total_with_new = existing_total + new_installment_amount
+        # Calculate new installment amount as remaining balance
+        # new_installment_amount + existing_total = final_total_quote_amount
+        new_installment_amount = final_total_quote_amount - existing_total
 
-        if total_with_new > final_total_quote_amount:
+        # Validate that there's remaining balance to create installment
+        if new_installment_amount <= 0:
             return build_error_response(
-                message=f"Cannot create installment: Total installments ({total_with_new}) would exceed quote amount ({final_total_quote_amount}). "
-                        f"Existing pending/paid installments total: {existing_total}",
+                message=f"Cannot create installment: Quote amount ({final_total_quote_amount}) is already fully covered by existing installments ({existing_total}). "
+                        f"No remaining balance available.",
                 error_code=ErrorCode.VALIDATION_ERROR,
                 details={
                     "quote_amount": final_total_quote_amount,
                     "existing_installments_total": existing_total,
-                    "new_installment_amount": new_installment_amount,
-                    "total_with_new": total_with_new,
+                    "remaining_balance": new_installment_amount,
                 },
             )
 
