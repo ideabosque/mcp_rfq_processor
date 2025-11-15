@@ -108,6 +108,7 @@ processor = MCPRfqProcessor(
     aws_secret_access_key="your-secret-key",
     execute_mode="aws_lambda",  # or "local" for testing
     default_batch_expiration_filter_days=90,  # Default: 90 days (~3 months)
+    installment_scheduled_day=15,  # Default: 15th day of month for installment schedules
 )
 
 processor.endpoint_id = "your-endpoint-id"
@@ -122,6 +123,7 @@ processor.endpoint_id = "your-endpoint-id"
 | `aws_secret_access_key` | string | - | AWS secret access key |
 | `execute_mode` | string | - | Execution mode: `aws_lambda` or `local` |
 | `default_batch_expiration_filter_days` | integer | 90 | Default minimum expiration days for `get_provider_item_batches`. When no expiration filters are provided, only returns batches expiring this many days or more in the future. |
+| `installment_scheduled_day` | integer | 15 | Day of month (1-31) for scheduled installment dates in `create_installments`. If day doesn't exist in a month (e.g., Feb 31), uses last day of that month. |
 
 ## Available MCP Tools
 
@@ -634,7 +636,7 @@ Create multiple payment installments for a quote based on a payment schedule. Au
 
 **Automatic Behavior:**
 - **Amount per installment**: `remaining_balance / interval_num` (equal distribution)
-- **Scheduled dates**: Calculated using current time + interval spacing (months)
+- **Scheduled dates**: Calculated using current time + interval spacing (months), scheduled on the configured day of month (default: 15th). Uses `installment_scheduled_day` setting. If the day doesn't exist in a month (e.g., Feb 31), uses the last day of that month.
 - **Priority**: Auto-increments sequentially for each installment
 - **Status**: All installments created with `pending` status
 

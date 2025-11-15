@@ -10,6 +10,7 @@ from typing import Any, Dict
 
 import boto3
 import humps
+import pendulum
 from silvaengine_utility import Utility
 
 # Import centralized error handling utilities
@@ -2906,11 +2907,10 @@ class MCPRfqProcessor:
         Maps to GraphQL: insertUpdateInstallment mutation (called multiple times)
 
         Calculates remaining balance and divides equally across installments.
-        Scheduled dates are calculated based on interval_num and total_pay_period.
+        Scheduled dates are calculated based on interval_num, total_pay_period, and
+        installment_scheduled_day setting (default: 15th of each month).
         Example: interval_num=12, total_pay_period=12 means 12 monthly payments over 1 year.
         """
-        from datetime import datetime, timedelta, timezone
-
         self.logger.info(f"Creating installments: {arguments}")
 
         quote_uuid = arguments["quote_uuid"]
@@ -2993,18 +2993,31 @@ class MCPRfqProcessor:
         # Calculate interval in months (total_pay_period / interval_num)
         months_per_interval = total_pay_period / interval_num
 
+        # Get the configured day of month for installment scheduled dates (default: 15)
+        installment_scheduled_day = self.setting.get("installment_scheduled_day", 15)
+
         # Create installments
         created_installments = []
-        current_time = datetime.now(timezone.utc)
+        current_time = pendulum.now("UTC")
 
         for i in range(interval_num):
-            # Calculate scheduled date for this installment
+            # Calculate scheduled date for this installment using pendulum
             # Add months_per_interval * i months to current time
             months_to_add = int(months_per_interval * i)
-            days_to_add = int((months_per_interval * i - months_to_add) * 30)  # Approximate fractional months as days
 
-            scheduled_datetime = current_time + timedelta(days=months_to_add * 30 + days_to_add)
-            scheduled_date = scheduled_datetime.strftime("%Y-%m-%dT%H:%M:%S+0000")
+            # Start with current time and add months
+            scheduled_datetime = current_time.add(months=months_to_add)
+
+            # Set to the configured day of month (e.g., 15th)
+            # Handle edge case where day doesn't exist in target month (e.g., Feb 30)
+            try:
+                scheduled_datetime = scheduled_datetime.set(day=installment_scheduled_day)
+            except ValueError:
+                # If day doesn't exist (e.g., 31st in Feb), use last day of month
+                scheduled_datetime = scheduled_datetime.end_of("month").start_of("day")
+
+            # Format as ISO 8601 with UTC timezone
+            scheduled_date = scheduled_datetime.format("YYYY-MM-DDTHH:mm:ssZ")
 
             # Set priority
             new_priority = max_priority + 1 + i
