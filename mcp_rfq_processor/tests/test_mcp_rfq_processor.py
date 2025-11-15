@@ -323,10 +323,20 @@ def mcp_rfq_processor():
 @log_test_result
 def test_get_segment_contacts(mcp_rfq_processor, test_data):
     """Test getting segment contacts."""
+    params = {}
+    if test_data.get("consumerCorpExternalId"):
+        params["consumer_corp_external_id"] = test_data["consumerCorpExternalId"]
+    if test_data.get("email"):
+        params["email"] = test_data["email"]
+    if test_data.get("limit"):
+        params["limit"] = test_data["limit"]
+    if test_data.get("pageNumber"):
+        params["page_number"] = test_data["pageNumber"]
+
     result, error = _call_method(
         mcp_rfq_processor,
         "get_segment_contacts",
-        {"segment_uuid": test_data.get("segmentUuid")},
+        params,
         "get_segment_contacts",
     )
 

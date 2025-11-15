@@ -835,13 +835,13 @@ MCP_CONFIGURATION = {
                         "type": "integer",
                         "description": "Results per page (default: 50)",
                     },
-                    "segment_uuid": {
+                    "consumer_corp_external_id": {
                         "type": "string",
-                        "description": "Filter by segment UUID",
+                        "description": "Filter by consumer corporation external ID",
                     },
-                    "contact_uuid": {
+                    "email": {
                         "type": "string",
-                        "description": "Filter by contact UUID",
+                        "description": "Filter by contact email address",
                     },
                 },
             },
@@ -2786,8 +2786,8 @@ class MCPRfqProcessor:
         variables = {
             "pageNumber": arguments.get("page_number", 1),
             "limit": arguments.get("limit", 50),
-            "segmentUuid": arguments.get("segment_uuid"),
-            "contactUuid": arguments.get("contact_uuid"),
+            "consumerCorpExternalId": arguments.get("consumer_corp_external_id"),
+            "email": arguments.get("email"),
         }
 
         variables = {k: v for k, v in variables.items() if v is not None}

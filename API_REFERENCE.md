@@ -422,8 +422,8 @@ List contacts in a segment (read-only access for pricing lookups).
 {
   pageNumber: Int
   limit: Int
-  segmentUuid: String
-  contactUuid: String
+  consumerCorpExternalId: String
+  email: String
 }
 ```
 
@@ -786,8 +786,8 @@ query {
   ) {
     totalCount
     segmentContacts {
-      segmentUuid
       segment {
+        segmentUuid
         segmentName
         segmentDescription
       }

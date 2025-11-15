@@ -586,12 +586,15 @@ Retrieve files associated with a request.
 **Note:** Segments are typically managed through the backend admin interface. This tool provides read-only access to segment-contact associations for pricing lookups.
 
 #### `get_segment_contacts`
-List contacts in a segment.
+List contacts in a segment by consumer corporation or email.
 
 **Input:**
 ```json
 {
-  "segment_uuid": "segment-uuid"
+  "consumer_corp_external_id": "CUSTOMER-001",
+  "email": "buyer@customer.com",
+  "page_number": 1,
+  "limit": 50
 }
 ```
 
