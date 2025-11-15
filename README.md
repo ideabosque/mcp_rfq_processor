@@ -535,16 +535,28 @@ Set up a payment installment for a quote.
 - When all installments are `paid`, update quote status to `completed`
 
 **Automatic Behavior:**
-- **Amount**: Automatically calculates as `final_total_quote_amount - existing_installments_total` (remaining balance)
+- **Amount**: If `installment_amount` not provided, uses remaining balance (`final_total_quote_amount - existing_installments_total`). If provided, validates it's ≤ remaining balance
 - **Due Date**: Automatically sets to current time (no need to specify)
 - **installment_ratio**: Auto-calculated by backend based on `installment_amount` / `final_total_quote_amount`
-- **Validation**: Ensures remaining balance is available before creating installment
+- **Validation**: Ensures installment amount doesn't exceed remaining balance
 
-**Input (Simplified):**
+**Input Options:**
+
+**Option 1: Full remaining balance (automatic)**
 ```json
 {
   "quote_uuid": "quote-uuid",
   "request_uuid": "request-uuid",
+  "status": "pending"
+}
+```
+
+**Option 2: Partial installment (custom amount)**
+```json
+{
+  "quote_uuid": "quote-uuid",
+  "request_uuid": "request-uuid",
+  "installment_amount": 3000.00,
   "status": "pending"
 }
 ```
@@ -555,11 +567,12 @@ Set up a payment installment for a quote.
 - `cancelled`: Payment was cancelled or refunded
 
 **Validation Rules:**
-- New installment amount is calculated as: `final_total_quote_amount - existing_pending_paid_total`
-- If the remaining balance is ≤ 0 (quote fully covered), installment creation is blocked
+- **Without installment_amount**: Uses full remaining balance (`final_total_quote_amount - existing_pending_paid_total`)
+- **With installment_amount**: Must be > 0 and ≤ remaining balance
+- If remaining balance ≤ 0 (quote fully covered), installment creation is blocked
 - Cancelled installments are not counted in the total
-- Each installment fills the remaining balance at the time of creation
-- If validation fails, an error is returned with details about remaining balance
+- Supports multiple partial installments that add up to quote total
+- If validation fails, returns detailed error with remaining balance breakdown
 
 **Output:** Installment record with auto-calculated amount, due_date, and installment_ratio.
 

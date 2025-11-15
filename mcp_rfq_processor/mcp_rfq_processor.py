@@ -725,7 +725,7 @@ MCP_CONFIGURATION = {
         # Installment Tools (2)
         {
             "name": "create_installment",
-            "description": "Create payment installment for a quote. Automatically calculates amount as remaining balance (final_total_quote_amount - existing_installments_total) and sets due_date to current time. Validates remaining balance is available. Typically created when quote status changes to 'confirmed'. Returns created installment details.",
+            "description": "Create payment installment for a quote. If installment_amount not provided, automatically calculates as remaining balance (final_total_quote_amount - existing_installments_total). If provided, validates it doesn't exceed remaining balance. Sets due_date to current time. Typically created when quote status changes to 'confirmed'. Returns created installment details.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -736,6 +736,10 @@ MCP_CONFIGURATION = {
                     "request_uuid": {
                         "type": "string",
                         "description": "UUID of the request",
+                    },
+                    "installment_amount": {
+                        "type": "number",
+                        "description": "Optional installment amount. If not provided, uses remaining balance (final_total_quote_amount - existing_installments_total). If provided, must be <= remaining balance.",
                     },
                     "status": {
                         "type": "string",
@@ -2719,12 +2723,11 @@ class MCPRfqProcessor:
         for inst in installment_list:
             existing_total += inst.get("installment_amount", 0)
 
-        # Calculate new installment amount as remaining balance
-        # new_installment_amount + existing_total = final_total_quote_amount
-        new_installment_amount = final_total_quote_amount - existing_total
+        # Calculate remaining balance
+        remaining_balance = final_total_quote_amount - existing_total
 
         # Validate that there's remaining balance to create installment
-        if new_installment_amount <= 0:
+        if remaining_balance <= 0:
             return build_error_response(
                 message=f"Cannot create installment: Quote amount ({final_total_quote_amount}) is already fully covered by existing installments ({existing_total}). "
                         f"No remaining balance available.",
@@ -2732,13 +2735,38 @@ class MCPRfqProcessor:
                 details={
                     "quote_amount": final_total_quote_amount,
                     "existing_installments_total": existing_total,
-                    "remaining_balance": new_installment_amount,
+                    "remaining_balance": remaining_balance,
                 },
             )
 
+        # Determine installment amount
+        requested_amount = arguments.get("installment_amount")
+        if requested_amount is not None:
+            # User provided amount - validate it doesn't exceed remaining balance
+            if requested_amount > remaining_balance:
+                return build_error_response(
+                    message=f"Cannot create installment: Requested amount ({requested_amount}) exceeds remaining balance ({remaining_balance}). "
+                            f"Quote amount: {final_total_quote_amount}, Existing installments: {existing_total}",
+                    error_code=ErrorCode.VALIDATION_ERROR,
+                    details={
+                        "quote_amount": final_total_quote_amount,
+                        "existing_installments_total": existing_total,
+                        "remaining_balance": remaining_balance,
+                        "requested_amount": requested_amount,
+                    },
+                )
+            if requested_amount <= 0:
+                return build_error_response(
+                    message=f"Cannot create installment: Requested amount ({requested_amount}) must be greater than 0.",
+                    error_code=ErrorCode.VALIDATION_ERROR,
+                )
+            installment_amount = requested_amount
+        else:
+            # No amount provided - use full remaining balance
+            installment_amount = remaining_balance
+
         # Set due_date to current time
         scheduled_date = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+0000")
-        installment_amount = new_installment_amount
 
         variables = {
             "quoteUuid": quote_uuid,
