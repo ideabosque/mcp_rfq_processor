@@ -292,6 +292,7 @@ QUOTE_ITEM_TEST_DATA = _TEST_DATA.get("quote_item_test_data", [])
 INSTALLMENT_TEST_DATA = _TEST_DATA.get("installment_test_data", [])
 INSTALLMENT_LIST_TEST_DATA = _TEST_DATA.get("installment_list_test_data", [])
 INSTALLMENT_UPDATE_TEST_DATA = _TEST_DATA.get("installment_update_test_data", [])
+INSTALLMENTS_CREATE_TEST_DATA = _TEST_DATA.get("installments_create_test_data", [])
 FILE_TEST_DATA = _TEST_DATA.get("file_test_data", [])
 
 
@@ -1393,6 +1394,33 @@ def test_update_installment(mcp_rfq_processor, test_data):
     assert error is None
     assert result is not None
     assert "installment_uuid" in result
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", INSTALLMENTS_CREATE_TEST_DATA)
+@log_test_result
+def test_create_installments(mcp_rfq_processor, test_data):
+    """Test creating multiple installments based on payment schedule."""
+    arguments = {
+        "quote_uuid": test_data.get("quoteUuid"),
+        "request_uuid": test_data.get("requestUuid"),
+        "interval_num": test_data.get("intervalNum"),
+        "total_pay_period": test_data.get("totalPayPeriod"),
+    }
+
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "create_installments",
+        arguments,
+        "create_installments",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "installments" in result
+    assert "total_created" in result
+    assert result["total_created"] == test_data.get("intervalNum")
+    assert len(result["installments"]) == test_data.get("intervalNum")
 
 
 # ============================================================================

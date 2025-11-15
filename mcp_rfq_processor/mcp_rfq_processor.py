@@ -778,6 +778,32 @@ MCP_CONFIGURATION = {
             },
         },
         {
+            "name": "create_installments",
+            "description": "Create multiple payment installments for a quote based on payment schedule. Calculates remaining balance (final_total_quote_amount - existing_installments_total) and divides equally across installments. Scheduled dates are calculated based on interval and total pay period (e.g., monthly intervals over 12 months). Priority auto-increments for each installment. All installments created with status 'pending'. Returns list of created installments.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "quote_uuid": {
+                        "type": "string",
+                        "description": "UUID of the quote",
+                    },
+                    "request_uuid": {
+                        "type": "string",
+                        "description": "UUID of the request",
+                    },
+                    "interval_num": {
+                        "type": "integer",
+                        "description": "Number of installments to create (e.g., 12 for monthly payments over a year)",
+                    },
+                    "total_pay_period": {
+                        "type": "integer",
+                        "description": "Total payment period in months (e.g., 12 for one year, 24 for two years)",
+                    },
+                },
+                "required": ["quote_uuid", "request_uuid", "interval_num", "total_pay_period"],
+            },
+        },
+        {
             "name": "get_installments",
             "description": "Get installment schedule for a quote. Returns paginated list of installments.",
             "inputSchema": {
@@ -2871,6 +2897,158 @@ class MCPRfqProcessor:
         installment = humps.decamelize(result["insertUpdateInstallment"]["installment"])
 
         return installment
+
+    # * MCP Function.
+    @handle_errors(operation_name="create installments")
+    def create_installments(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Create multiple payment installments based on payment schedule.
+        Maps to GraphQL: insertUpdateInstallment mutation (called multiple times)
+
+        Calculates remaining balance and divides equally across installments.
+        Scheduled dates are calculated based on interval_num and total_pay_period.
+        Example: interval_num=12, total_pay_period=12 means 12 monthly payments over 1 year.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        self.logger.info(f"Creating installments: {arguments}")
+
+        quote_uuid = arguments["quote_uuid"]
+        request_uuid = arguments["request_uuid"]
+        interval_num = arguments["interval_num"]
+        total_pay_period = arguments["total_pay_period"]
+
+        # Validate interval_num
+        if interval_num <= 0:
+            return build_error_response(
+                message=f"interval_num must be greater than 0, got: {interval_num}",
+                error_code=ErrorCode.VALIDATION_ERROR,
+            )
+
+        # Validate total_pay_period
+        if total_pay_period <= 0:
+            return build_error_response(
+                message=f"total_pay_period must be greater than 0, got: {total_pay_period}",
+                error_code=ErrorCode.VALIDATION_ERROR,
+            )
+
+        # Fetch quote to get final_total_quote_amount
+        quote_result = self.get_quote(
+            request_uuid=request_uuid,
+            quote_uuid=quote_uuid,
+        )
+
+        if error := propagate_error_if_present(quote_result):
+            return error
+
+        # Get the quote amount
+        final_total_quote_amount = quote_result.get("final_total_quote_amount")
+        if final_total_quote_amount is None:
+            return build_error_response(
+                message=f"Quote {quote_uuid} does not have final_total_quote_amount set",
+                error_code=ErrorCode.VALIDATION_ERROR,
+            )
+
+        # Get all existing installments for the quote
+        all_installments_result = self.get_installments(
+            quote_uuid=quote_uuid,
+            limit=100,
+        )
+
+        if error := propagate_error_if_present(all_installments_result):
+            return error
+
+        # Calculate total of pending/paid installments and find max priority
+        existing_total = 0
+        max_priority = -1
+        all_installment_list = all_installments_result.get("installment_list", [])
+
+        for inst in all_installment_list:
+            inst_status = inst.get("status", "")
+            if inst_status in ["pending", "paid"]:
+                existing_total += inst.get("installment_amount", 0)
+
+            priority = inst.get("priority", 0)
+            if priority is not None and priority > max_priority:
+                max_priority = priority
+
+        # Calculate remaining balance
+        remaining_balance = final_total_quote_amount - existing_total
+
+        # Validate that there's remaining balance
+        if remaining_balance <= 0:
+            return build_error_response(
+                message=f"Cannot create installments: Quote amount ({final_total_quote_amount}) is already fully covered by existing installments ({existing_total}).",
+                error_code=ErrorCode.VALIDATION_ERROR,
+                details={
+                    "quote_amount": final_total_quote_amount,
+                    "existing_installments_total": existing_total,
+                    "remaining_balance": remaining_balance,
+                },
+            )
+
+        # Calculate installment amount per installment
+        installment_amount_per = remaining_balance / interval_num
+
+        # Calculate interval in months (total_pay_period / interval_num)
+        months_per_interval = total_pay_period / interval_num
+
+        # Create installments
+        created_installments = []
+        current_time = datetime.now(timezone.utc)
+
+        for i in range(interval_num):
+            # Calculate scheduled date for this installment
+            # Add months_per_interval * i months to current time
+            months_to_add = int(months_per_interval * i)
+            days_to_add = int((months_per_interval * i - months_to_add) * 30)  # Approximate fractional months as days
+
+            scheduled_datetime = current_time + timedelta(days=months_to_add * 30 + days_to_add)
+            scheduled_date = scheduled_datetime.strftime("%Y-%m-%dT%H:%M:%S+0000")
+
+            # Set priority
+            new_priority = max_priority + 1 + i
+
+            # Create installment
+            variables = {
+                "quoteUuid": quote_uuid,
+                "requestUuid": request_uuid,
+                "priority": new_priority,
+                "scheduledDate": scheduled_date,
+                "installmentAmount": installment_amount_per,
+                "status": "pending",
+                "updatedBy": "MCP",
+            }
+
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "insertUpdateInstallment",
+                "Mutation",
+                variables,
+            )
+
+            # Check for error in response
+            if error := propagate_error_if_present(result):
+                # If one fails, return error with what was created so far
+                return build_error_response(
+                    message=f"Failed to create installment {i+1}/{interval_num}: {error.get('message', 'Unknown error')}",
+                    error_code=ErrorCode.GRAPHQL_ERROR,
+                    details={
+                        "created_installments": created_installments,
+                        "failed_at": i + 1,
+                        "total_requested": interval_num,
+                    },
+                )
+
+            installment = humps.decamelize(result["insertUpdateInstallment"]["installment"])
+            created_installments.append(installment)
+
+        return {
+            "installments": created_installments,
+            "total_created": len(created_installments),
+            "installment_amount_per": installment_amount_per,
+            "total_installment_amount": remaining_balance,
+        }
 
     # * MCP Function.
     @handle_errors(operation_name="get installments")

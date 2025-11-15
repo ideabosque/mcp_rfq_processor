@@ -524,7 +524,7 @@ Get applicable discount rules.
 
 ---
 
-### 5. Installment Management (3 tools)
+### 5. Installment Management (4 tools)
 
 #### `create_installment`
 Set up a payment installment for a quote.
@@ -621,6 +621,86 @@ Update installment status and sales order number.
 ```
 
 **Output:** Updated installment record.
+
+#### `create_installments`
+Create multiple payment installments for a quote based on a payment schedule. Automates the process of setting up installment plans (e.g., monthly payments over a year).
+
+**Workflow:**
+- Calculates remaining balance (`final_total_quote_amount - existing_pending_paid_total`)
+- Divides remaining balance equally across `interval_num` installments
+- Calculates scheduled dates based on `interval_num` and `total_pay_period`
+- Creates all installments with `status=pending`
+- Auto-increments priority for sequential ordering
+
+**Automatic Behavior:**
+- **Amount per installment**: `remaining_balance / interval_num` (equal distribution)
+- **Scheduled dates**: Calculated using current time + interval spacing (months)
+- **Priority**: Auto-increments sequentially for each installment
+- **Status**: All installments created with `pending` status
+
+**Input:**
+```json
+{
+  "quote_uuid": "quote-uuid",
+  "request_uuid": "request-uuid",
+  "interval_num": 12,
+  "total_pay_period": 12
+}
+```
+
+**Examples:**
+
+**12 monthly payments over 1 year:**
+```json
+{
+  "quote_uuid": "quote-uuid",
+  "request_uuid": "request-uuid",
+  "interval_num": 12,
+  "total_pay_period": 12
+}
+// Creates 12 installments, scheduled monthly (every 1 month)
+// Amount per installment: remaining_balance / 12
+```
+
+**6 bi-monthly payments over 1 year:**
+```json
+{
+  "quote_uuid": "quote-uuid",
+  "request_uuid": "request-uuid",
+  "interval_num": 6,
+  "total_pay_period": 12
+}
+// Creates 6 installments, scheduled bi-monthly (every 2 months)
+// Amount per installment: remaining_balance / 6
+```
+
+**4 quarterly payments over 2 years:**
+```json
+{
+  "quote_uuid": "quote-uuid",
+  "request_uuid": "request-uuid",
+  "interval_num": 4,
+  "total_pay_period": 24
+}
+// Creates 4 installments, scheduled every 6 months
+// Amount per installment: remaining_balance / 4
+```
+
+**Validation Rules:**
+- `interval_num` must be > 0
+- `total_pay_period` must be > 0
+- Remaining balance must be > 0 (quote not already fully covered)
+- If any installment creation fails, returns error with details of what was created
+
+**Output:**
+```json
+{
+  "installments": [ /* array of created installment objects */ ],
+  "total_created": 12,
+  "installment_amount_per": 833.33,
+  "total_installment_amount": 10000.00
+}
+```
 
 #### `get_installments`
 Retrieve installments for a quote.

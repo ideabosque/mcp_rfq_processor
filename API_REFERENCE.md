@@ -5,7 +5,7 @@
 This document provides a comprehensive reference for the GraphQL API operations used by the MCP RFQ Processor, including all queries, mutations, and type definitions from the `ai_rfq_engine` GraphQL backend.
 
 **Version**: 0.1.1  
-**Total MCP Tools**: 26 (all implemented)  
+**Total MCP Tools**: 27 (all implemented)  
 **GraphQL Endpoint**: ai_rfq_graphql (AWS Lambda)
 
 ## Table of Contents
@@ -765,10 +765,11 @@ type Segment {
 | 20 | calculate_quote_pricing | Multiple Queries | Business Logic | Pricing | Groups request items, returns pricing + rules |
 | 21 | create_installment | insertUpdateInstallment | Mutation | Installment | Create installment |
 | 22 | update_installment | insertUpdateInstallment | Mutation | Installment | Update installment status/SO |
-| 23 | get_installments | installmentList | Query | Installment | Get installment schedule |
-| 24 | upload_rfq_file | insertUpdateFile | Mutation | File | Upload document |
-| 25 | get_rfq_files | fileList | Query | File | Get files |
-| 26 | get_segment_contacts | segmentContactList | Query | Segment | List contacts (read-only) |
+| 23 | create_installments | insertUpdateInstallment | Mutation | Installment | Create multiple installments |
+| 24 | get_installments | installmentList | Query | Installment | Get installment schedule |
+| 25 | upload_rfq_file | insertUpdateFile | Mutation | File | Upload document |
+| 26 | get_rfq_files | fileList | Query | File | Get files |
+| 27 | get_segment_contacts | segmentContactList | Query | Segment | List contacts (read-only) |
 
 ---
 
