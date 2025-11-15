@@ -53,16 +53,44 @@ quote (in_progress)
     • remove quote items
     ↓
 quote (confirmed)
+    • create installment(s) with status=pending
     ↓
-quote (completed) with payment (create installment) or quote (disapproved)
+quote (completed) or quote (disapproved)
+    • when completed: update installment(s) to status=paid
 ```
 
 **Quote Status Definitions:**
 - **initial**: Quote has been created but not yet being worked on
 - **in_progress**: Quote is being edited, items can be added/updated/removed
-- **confirmed**: Quote has been finalized and is awaiting approval/payment
-- **completed**: Quote has been approved and payment installments have been created
+- **confirmed**: Quote has been finalized and is awaiting approval/payment; installments should be created with `pending` status
+- **completed**: Quote has been approved and all payment installments have been marked as `paid`
 - **disapproved**: Quote was rejected or invalidated (e.g., when parent request is modified)
+
+### Installment Status Flow
+
+```
+installment (pending)
+    • created when quote is confirmed
+    • payment is scheduled but not yet received
+    ↓
+installment (paid)
+    • payment has been received and verified
+    • quote status updated to completed when all installments are paid
+    ↓
+installment (cancelled) [optional]
+    • payment was cancelled or refunded
+```
+
+**Installment Status Definitions:**
+- **pending**: Installment has been created and payment is scheduled, but not yet received
+- **paid**: Payment has been received and verified for this installment
+- **cancelled**: Payment was cancelled, refunded, or the installment is no longer valid
+
+**Installment Workflow:**
+1. When quote status changes to `confirmed`, create installment(s) with `status=pending`
+2. When payment is received, update installment status to `paid`
+3. When all installments for a quote are `paid`, update quote status to `completed`
+4. Each installment can have a `scheduled_date` for payment due date tracking
 
 ### Critical Business Rules
 

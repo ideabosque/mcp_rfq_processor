@@ -529,6 +529,11 @@ Get applicable discount rules.
 #### `create_installment`
 Set up a payment installment for a quote.
 
+**Workflow:**
+- Create installments with `status=pending` when quote status changes to `confirmed`
+- Update installment `status=paid` when payment is received
+- When all installments are `paid`, update quote status to `completed`
+
 **Note**: `installment_ratio` is auto-calculated by the backend based on `installment_amount` / `final_total_quote_amount`.
 
 **Input:**
@@ -542,6 +547,11 @@ Set up a payment installment for a quote.
   "status": "pending"
 }
 ```
+
+**Installment Status Values:**
+- `pending`: Payment scheduled but not yet received (default when quote is confirmed)
+- `paid`: Payment has been received and verified
+- `cancelled`: Payment was cancelled or refunded
 
 **Output:** Installment record with auto-calculated `installment_ratio`.
 
