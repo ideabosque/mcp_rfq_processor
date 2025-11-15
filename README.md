@@ -534,16 +534,16 @@ Set up a payment installment for a quote.
 - Update installment `status=paid` when payment is received
 - When all installments are `paid`, update quote status to `completed`
 
-**Note**: `installment_ratio` is auto-calculated by the backend based on `installment_amount` / `final_total_quote_amount`.
+**Automatic Behavior:**
+- **Amount**: Automatically uses the quote's `final_total_quote_amount` (no need to specify)
+- **Due Date**: Automatically sets to current time (no need to specify)
+- **installment_ratio**: Auto-calculated by backend based on `installment_amount` / `final_total_quote_amount`
 
-**Input:**
+**Input (Simplified):**
 ```json
 {
   "quote_uuid": "quote-uuid",
-  "installment_number": 1,
-  "salesorder_no": "SO-12345",
-  "due_date": "2025-12-01T00:00:00Z",
-  "amount": 3000.00,
+  "request_uuid": "request-uuid",
   "status": "pending"
 }
 ```
@@ -553,7 +553,7 @@ Set up a payment installment for a quote.
 - `paid`: Payment has been received and verified
 - `cancelled`: Payment was cancelled or refunded
 
-**Output:** Installment record with auto-calculated `installment_ratio`.
+**Output:** Installment record with auto-calculated amount, due_date, and installment_ratio.
 
 #### `get_installments`
 Retrieve installments for a quote.
@@ -730,11 +730,11 @@ processor.update_quote(
 )
 
 # Step 12-13: Create installment plan and submit
+# Installment automatically uses quote's final_total_quote_amount
 processor.create_installment(
+    request_uuid=request_uuid,
     quote_uuid=quote["quote_uuid"],
-    installment_number=1,
-    due_date="2025-12-01T00:00:00Z",
-    amount=2293.75  # 50% of final total
+    status="pending"  # Default status when quote is confirmed
 )
 
 processor.update_quote(

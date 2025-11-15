@@ -1327,16 +1327,14 @@ def test_remove_quote_item(mcp_rfq_processor, test_data):
 @pytest.mark.parametrize("test_data", INSTALLMENT_TEST_DATA)
 @log_test_result
 def test_create_installment(mcp_rfq_processor, test_data):
-    """Test creating installment."""
+    """Test creating installment with auto amount and due_date."""
     result, error = _call_method(
         mcp_rfq_processor,
         "create_installment",
         {
             "request_uuid": test_data.get("requestUuid"),
             "quote_uuid": test_data.get("quoteUuid"),
-            "installment_number": test_data.get("priority", 1),
-            "due_date": test_data.get("scheduledDate"),
-            "amount": test_data.get("installmentAmount"),
+            "status": test_data.get("status", "pending"),
         },
         "create_installment",
     )
@@ -1344,6 +1342,10 @@ def test_create_installment(mcp_rfq_processor, test_data):
     assert error is None
     assert result is not None
     assert "installment_uuid" in result
+    # Verify amount was set from quote's final_total_quote_amount
+    assert "installment_amount" in result
+    # Verify scheduled_date was set
+    assert "scheduled_date" in result
 
 
 @pytest.mark.integration

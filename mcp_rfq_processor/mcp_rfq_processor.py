@@ -725,7 +725,7 @@ MCP_CONFIGURATION = {
         # Installment Tools (2)
         {
             "name": "create_installment",
-            "description": "Create payment installment for a quote. Used to set up payment schedules. Returns created installment details.",
+            "description": "Create payment installment for a quote. Automatically uses the quote's final_total_quote_amount and sets due_date to current time if not provided. Typically created when quote status changes to 'confirmed'. Returns created installment details.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -737,29 +737,13 @@ MCP_CONFIGURATION = {
                         "type": "string",
                         "description": "UUID of the request",
                     },
-                    "installment_number": {
-                        "type": "integer",
-                        "description": "Installment sequence number (priority)",
-                    },
-                    "salesorder_no": {
-                        "type": "string",
-                        "description": "Sales order number",
-                    },
-                    "due_date": {
-                        "type": "string",
-                        "description": "Payment due date / scheduled date (ISO 8601 format)",
-                    },
-                    "amount": {
-                        "type": "number",
-                        "description": "Installment amount (installment_ratio will be auto-calculated based on quote total)",
-                    },
                     "status": {
                         "type": "string",
                         "description": "Installment status (default: pending)",
-                        "enum": ["pending", "paid", "overdue", "cancelled"],
+                        "enum": ["pending", "paid", "cancelled"],
                     },
                 },
-                "required": ["quote_uuid"],
+                "required": ["quote_uuid", "request_uuid"],
             },
         },
         {
@@ -2691,18 +2675,42 @@ class MCPRfqProcessor:
         Create payment installment.
         Maps to GraphQL: insertUpdateInstallment mutation
 
-        Note: installment_ratio is automatically calculated by the backend
-        based on installment_amount / quote's final_total_quote_amount.
+        Automatically fetches quote's final_total_quote_amount if amount not provided.
+        Sets due_date to current time if not provided.
+        installment_ratio is automatically calculated by the backend.
         """
+        from datetime import datetime, timezone
+
         self.logger.info(f"Creating installment: {arguments}")
 
+        quote_uuid = arguments["quote_uuid"]
+        request_uuid = arguments["request_uuid"]
+
+        # Fetch quote to get final_total_quote_amount
+        quote_result = self.get_quote(
+            request_uuid=request_uuid,
+            quote_uuid=quote_uuid,
+        )
+
+        if error := propagate_error_if_present(quote_result):
+            return error
+
+        # Get the quote amount
+        installment_amount = quote_result.get("final_total_quote_amount")
+        if installment_amount is None:
+            return build_error_response(
+                message=f"Quote {quote_uuid} does not have final_total_quote_amount set",
+                error_code=ErrorCode.VALIDATION_ERROR,
+            )
+
+        # Set due_date to current time if not provided
+        scheduled_date = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+0000")
+
         variables = {
-            "quoteUuid": arguments["quote_uuid"],
-            "requestUuid": arguments.get("request_uuid"),
-            "priority": arguments.get("installment_number"),
-            "salesorderNo": arguments.get("salesorder_no"),
-            "scheduledDate": arguments.get("due_date"),
-            "installmentAmount": arguments.get("amount"),
+            "quoteUuid": quote_uuid,
+            "requestUuid": request_uuid,
+            "scheduledDate": scheduled_date,
+            "installmentAmount": installment_amount,
             "status": arguments.get("status", "pending"),
             "updatedBy": "MCP",
         }
