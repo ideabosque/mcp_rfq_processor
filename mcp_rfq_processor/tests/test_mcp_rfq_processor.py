@@ -291,6 +291,7 @@ QUOTE_LIST_TEST_DATA = _TEST_DATA.get("quote_list_test_data", [])
 QUOTE_ITEM_TEST_DATA = _TEST_DATA.get("quote_item_test_data", [])
 INSTALLMENT_TEST_DATA = _TEST_DATA.get("installment_test_data", [])
 INSTALLMENT_LIST_TEST_DATA = _TEST_DATA.get("installment_list_test_data", [])
+INSTALLMENT_UPDATE_TEST_DATA = _TEST_DATA.get("installment_update_test_data", [])
 FILE_TEST_DATA = _TEST_DATA.get("file_test_data", [])
 
 
@@ -1363,6 +1364,35 @@ def test_get_installments(mcp_rfq_processor, test_data):
     assert error is None
     assert result is not None
     assert "total" in result
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", INSTALLMENT_UPDATE_TEST_DATA)
+@log_test_result
+def test_update_installment(mcp_rfq_processor, test_data):
+    """Test updating installment status and sales order number."""
+    arguments = {
+        "quote_uuid": test_data.get("quoteUuid"),
+        "installment_uuid": test_data.get("installmentUuid"),
+    }
+
+    # Add optional fields if present
+    if test_data.get("status") is not None:
+        arguments["status"] = test_data.get("status")
+    if test_data.get("salesorderNo") is not None:
+        # Convert camelCase to snake_case
+        arguments["salesorder_no"] = test_data.get("salesorderNo")
+
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "update_installment",
+        arguments,
+        "update_installment",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "installment_uuid" in result
 
 
 # ============================================================================
