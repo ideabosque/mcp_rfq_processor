@@ -725,7 +725,7 @@ MCP_CONFIGURATION = {
         # Installment Tools (2)
         {
             "name": "create_installment",
-            "description": "Create payment installment for a quote. If installment_amount not provided, automatically calculates as remaining balance (final_total_quote_amount - existing_installments_total). If provided, validates it doesn't exceed remaining balance. Sets due_date to current time. Typically created when quote status changes to 'confirmed'. Returns created installment details.",
+            "description": "Create payment installment for a quote. If installment_amount not provided, uses remaining balance (final_total_quote_amount - existing_installments_total). If provided, uses the lesser of requested amount or remaining balance (auto-caps). Sets due_date to current time. Typically created when quote status changes to 'confirmed'. Returns created installment details.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -739,7 +739,7 @@ MCP_CONFIGURATION = {
                     },
                     "installment_amount": {
                         "type": "number",
-                        "description": "Optional installment amount. If not provided, uses remaining balance (final_total_quote_amount - existing_installments_total). If provided, must be <= remaining balance.",
+                        "description": "Optional installment amount. If not provided, uses remaining balance. If provided and exceeds remaining balance, automatically capped at remaining balance. Must be > 0.",
                     },
                     "status": {
                         "type": "string",
@@ -2742,25 +2742,14 @@ class MCPRfqProcessor:
         # Determine installment amount
         requested_amount = arguments.get("installment_amount")
         if requested_amount is not None:
-            # User provided amount - validate it doesn't exceed remaining balance
-            if requested_amount > remaining_balance:
-                return build_error_response(
-                    message=f"Cannot create installment: Requested amount ({requested_amount}) exceeds remaining balance ({remaining_balance}). "
-                            f"Quote amount: {final_total_quote_amount}, Existing installments: {existing_total}",
-                    error_code=ErrorCode.VALIDATION_ERROR,
-                    details={
-                        "quote_amount": final_total_quote_amount,
-                        "existing_installments_total": existing_total,
-                        "remaining_balance": remaining_balance,
-                        "requested_amount": requested_amount,
-                    },
-                )
+            # User provided amount - validate and cap at remaining balance
             if requested_amount <= 0:
                 return build_error_response(
                     message=f"Cannot create installment: Requested amount ({requested_amount}) must be greater than 0.",
                     error_code=ErrorCode.VALIDATION_ERROR,
                 )
-            installment_amount = requested_amount
+            # Cap at remaining balance if requested amount exceeds it
+            installment_amount = min(requested_amount, remaining_balance)
         else:
             # No amount provided - use full remaining balance
             installment_amount = remaining_balance
