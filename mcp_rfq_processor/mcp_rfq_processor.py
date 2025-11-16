@@ -8,23 +8,19 @@ import logging
 import traceback
 from typing import Any, Dict
 
-import boto3
 import humps
 import pendulum
-
-from silvaengine_utility import Utility
 
 # Import centralized error handling utilities
 from .error_handler import (
     ErrorCode,
-    GraphQLError,
     ValidationError,
     build_error_response,
-    extract_error_message,
     handle_errors,
     propagate_error_if_present,
     validate_not_empty,
 )
+from .graphql_client import GraphQLClient
 
 # MCP Configuration
 MCP_CONFIGURATION = {
@@ -1156,58 +1152,15 @@ class MCPRfqProcessor:
     def __init__(self, logger: logging.Logger, **setting: Dict[str, Any]):
         self.logger = logger
         self.setting = setting
-        self._endpoint_id = None
-        self._schemas = {}
-        self._aws_lambda = self._initialize_aws_lambda_client(**setting)
+        self.graphql_client = GraphQLClient(logger, **setting)
 
     @property
     def endpoint_id(self) -> str:
-        return self._endpoint_id
+        return self.graphql_client.endpoint_id
 
     @endpoint_id.setter
     def endpoint_id(self, value: str):
-        self._endpoint_id = value
-
-    def _initialize_aws_lambda_client(self, **setting: Dict[str, Any]) -> boto3.client:
-        region_name = setting.get("region_name")
-        aws_access_key_id = setting.get("aws_access_key_id")
-        aws_secret_access_key = setting.get("aws_secret_access_key")
-        if region_name and aws_access_key_id and aws_secret_access_key:
-            return boto3.client(
-                "lambda",
-                region_name=region_name,
-                aws_access_key_id=aws_access_key_id,
-                aws_secret_access_key=aws_secret_access_key,
-            )
-        else:
-            return boto3.client("lambda")
-
-    def _fetch_graphql_schema(
-        self,
-        function_name: str,
-    ) -> Dict[str, Any]:
-        try:
-            if self._schemas.get(function_name) is None:
-                self._schemas[function_name] = Utility.fetch_graphql_schema(
-                    self.logger,
-                    self.endpoint_id,
-                    function_name,
-                    setting=self.setting,
-                    execute_mode=self.setting.get("execute_mode"),
-                    aws_lambda=self._aws_lambda,
-                )
-            return self._schemas[function_name]
-        except Exception as e:
-            log = traceback.format_exc()
-            self.logger.error(log)
-            raise GraphQLError(
-                message=f"Failed to fetch GraphQL schema: {function_name}/{self.endpoint_id}. Please check the configuration and ensure all required settings are properly. Error: {e}",
-                error_code=ErrorCode.GRAPHQL_SCHEMA_FETCH_FAILED,
-                details={
-                    "function_name": function_name,
-                    "endpoint_id": self.endpoint_id,
-                },
-            )
+        self.graphql_client.endpoint_id = value
 
     def _execute_graphql_query(
         self,
@@ -1216,36 +1169,9 @@ class MCPRfqProcessor:
         operation_type: str,
         variables: Dict[str, Any],
     ) -> Dict[str, Any]:
-        try:
-            schema = self._fetch_graphql_schema(function_name)
-            query = Utility.generate_graphql_operation(
-                operation_name, operation_type, schema
-            )
-            self.logger.info(f"Query: {query}/{function_name}")
-            return Utility.execute_graphql_query(
-                self.logger,
-                self.endpoint_id,
-                function_name,
-                query,
-                variables,
-                setting=self.setting,
-                execute_mode=self.setting.get("execute_mode"),
-                aws_lambda=self._aws_lambda,
-            )
-        except GraphQLError as e:
-            # GraphQL-specific errors from _fetch_graphql_schema
-            log = traceback.format_exc()
-            self.logger.error(log)
-            return build_error_response(e.message, e.error_code, e.details)
-        except Exception as e:
-            # Other unexpected errors
-            log = traceback.format_exc()
-            self.logger.error(log)
-            return build_error_response(
-                extract_error_message(str(e)),
-                ErrorCode.GRAPHQL_QUERY_FAILED,
-                {"function_name": function_name, "operation": operation_name},
-            )
+        return self.graphql_client.execute_query(
+            function_name, operation_name, operation_type, variables
+        )
 
     # ==================== Request Management Tools ====================
 
