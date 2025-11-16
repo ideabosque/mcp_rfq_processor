@@ -1379,9 +1379,7 @@ class MCPRfqProcessor:
                                     "base_price_per_uom"
                                 ]
 
-                        # Remove provider_item and provider_item_batches
-                        tier.pop("provider_item", None)
-                        tier.pop("provider_item_batches", None)
+                        # Keep provider_item and provider_item_batches fields
                         price_tiers.append(tier)
 
                 item_data = {
