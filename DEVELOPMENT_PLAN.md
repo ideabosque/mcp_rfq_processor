@@ -248,7 +248,7 @@ python_files = "test_*.py"
 ### 2.1 MCP Configuration Structure
 **Priority**: Critical
 **Estimated Time**: 4 hours
-**Status**: ✅ COMPLETED - 25 tools implemented
+**Status**: ✅ COMPLETED - 26 tools implemented
 
 Implementation in `mcp_rfq_processor.py`:
 
@@ -425,8 +425,9 @@ MCP_CONFIGURATION = {
 ```
 
 **Tasks**:
-- [x] Define all 25 MCP tools with complete inputSchema
-- [x] Create module_links mapping
+- [x] Define all 26 MCP tools with complete inputSchema
+- [x] Create module_links mapping (27 total)
+- [x] Separate MCP configuration into dedicated file
 - [x] Define module settings
 
 ---

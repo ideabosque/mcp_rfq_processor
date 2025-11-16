@@ -318,7 +318,7 @@ MCP_CONFIGURATION = {
         },
         {
             "name": "get_provider_items",
-            "description": "Search provider inventory for specific items. Returns available provider items with pricing and availability.",
+            "description": "Search provider inventory with batch information merged. For each provider item, fetches and merges batch information including slow_move_item flags and guardrail pricing. Each batch includes: batch_no, expired_at, produced_at, slow_move_item, guardrail_price_per_uom. Optional batch filters can be applied when fetching batches. If no expiration filters provided, defaults to batches expiring 90+ days from now.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -345,6 +345,22 @@ MCP_CONFIGURATION = {
                     "max_base_price_per_uom": {
                         "type": "number",
                         "description": "Maximum price filter",
+                    },
+                    "expired_at_gt": {
+                        "type": "string",
+                        "description": "Filter batches expiring after this date (ISO 8601 format)",
+                    },
+                    "expired_at_lt": {
+                        "type": "string",
+                        "description": "Filter batches expiring before this date (ISO 8601 format)",
+                    },
+                    "slow_move_item": {
+                        "type": "boolean",
+                        "description": "Filter for slow-moving inventory (default: false)",
+                    },
+                    "in_stock": {
+                        "type": "boolean",
+                        "description": "Filter for in-stock batches (default: true)",
                     },
                 },
             },
@@ -803,6 +819,68 @@ MCP_CONFIGURATION = {
                 },
             },
         },
+        # Convenience/Workflow Tools (2)
+        {
+            "name": "confirm_request_and_create_quotes",
+            "description": "Convenience function to confirm an RFQ request and create quotes for selected providers in one operation. This combines update_rfq_request (to confirmed status) and create_quote (for each provider). Returns confirmed request and list of created quotes with full details.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request_uuid": {
+                        "type": "string",
+                        "description": "UUID of the RFQ request to confirm",
+                    },
+                    "provider_corp_external_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of provider corporation external IDs to create quotes for",
+                    },
+                    "segment_uuid": {
+                        "type": "string",
+                        "description": "Customer segment UUID for pricing",
+                    },
+                    "sales_rep_emails": {
+                        "type": "object",
+                        "description": "Optional mapping of provider_corp_external_id to sales rep email",
+                    },
+                },
+                "required": ["request_uuid", "provider_corp_external_ids", "segment_uuid"],
+            },
+        },
+        {
+            "name": "confirm_quote_and_create_installments",
+            "description": "Convenience function to confirm a quote and create installment plan in one operation. This combines update_quote (to confirmed status) and either create_installment or create_installments. Returns confirmed quote and created installments.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request_uuid": {
+                        "type": "string",
+                        "description": "UUID of the request",
+                    },
+                    "quote_uuid": {
+                        "type": "string",
+                        "description": "UUID of the quote to confirm",
+                    },
+                    "create_single_installment": {
+                        "type": "boolean",
+                        "description": "If true, creates one installment for full amount (default: true)",
+                    },
+                    "interval_num": {
+                        "type": "integer",
+                        "description": "Number of installments (required if create_single_installment=false)",
+                    },
+                    "total_pay_period": {
+                        "type": "integer",
+                        "description": "Total payment period in months (required if create_single_installment=false)",
+                    },
+                    "payment_method": {
+                        "type": "string",
+                        "description": "Optional payment method for installments",
+                    },
+                },
+                "required": ["request_uuid", "quote_uuid"],
+            },
+        },
         # File Tools (2)
         {
             "name": "upload_rfq_file",
@@ -974,7 +1052,7 @@ MCP_CONFIGURATION = {
             "name": "get_provider_item_batches",
             "module_name": "mcp_rfq_processor",
             "class_name": "MCPRfqProcessor",
-            "function_name": "get_provider_item_batches",
+            "function_name": "_get_provider_item_batches",
             "return_type": "text",
         },
         # Quote Management Tools
@@ -983,7 +1061,7 @@ MCP_CONFIGURATION = {
             "name": "create_quote",
             "module_name": "mcp_rfq_processor",
             "class_name": "MCPRfqProcessor",
-            "function_name": "create_quote",
+            "function_name": "_create_quote",
             "return_type": "text",
         },
         {
@@ -1049,7 +1127,7 @@ MCP_CONFIGURATION = {
             "name": "create_installment",
             "module_name": "mcp_rfq_processor",
             "class_name": "MCPRfqProcessor",
-            "function_name": "create_installment",
+            "function_name": "_create_installment",
             "return_type": "text",
         },
         {
@@ -1062,10 +1140,35 @@ MCP_CONFIGURATION = {
         },
         {
             "type": "tool",
+            "name": "create_installments",
+            "module_name": "mcp_rfq_processor",
+            "class_name": "MCPRfqProcessor",
+            "function_name": "_create_installments",
+            "return_type": "text",
+        },
+        {
+            "type": "tool",
             "name": "get_installments",
             "module_name": "mcp_rfq_processor",
             "class_name": "MCPRfqProcessor",
             "function_name": "get_installments",
+            "return_type": "text",
+        },
+        # Convenience/Workflow Tools
+        {
+            "type": "tool",
+            "name": "confirm_request_and_create_quotes",
+            "module_name": "mcp_rfq_processor",
+            "class_name": "MCPRfqProcessor",
+            "function_name": "confirm_request_and_create_quotes",
+            "return_type": "text",
+        },
+        {
+            "type": "tool",
+            "name": "confirm_quote_and_create_installments",
+            "module_name": "mcp_rfq_processor",
+            "class_name": "MCPRfqProcessor",
+            "function_name": "confirm_quote_and_create_installments",
             "return_type": "text",
         },
         # File Tools

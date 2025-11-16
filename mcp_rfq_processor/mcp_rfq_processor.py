@@ -509,6 +509,328 @@ class MCPRfqProcessor:
         return request
 
     # * MCP Function.
+    @handle_errors(operation_name="confirm request and create quotes")
+    def confirm_request_and_create_quotes(
+        self, **arguments: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Update request to confirmed status and create quotes for selected provider groups.
+
+        This is a convenience method that:
+        1. Updates the request status to 'confirmed'
+        2. Creates quotes for each selected provider_corp_external_id
+        3. Returns summary of created quotes
+
+        Args:
+            request_uuid: UUID of the request to confirm
+            provider_corp_external_ids: List of provider corporation external IDs to create quotes for
+            segment_uuid: Customer segment UUID (required for quote creation)
+            sales_rep_emails: Optional dict mapping provider_corp_external_id to sales rep email
+
+        Returns:
+            Dictionary with confirmed request and list of created quotes with full details (including quote items)
+        """
+        self.logger.info(f"Confirming request and creating quotes: {arguments}")
+
+        request_uuid = arguments["request_uuid"]
+        provider_corp_external_ids = arguments["provider_corp_external_ids"]
+        segment_uuid = arguments["segment_uuid"]
+        sales_rep_emails = arguments.get("sales_rep_emails", {})
+
+        # Validate inputs
+        validate_not_empty(request_uuid, "request_uuid", "Request UUID is required")
+        validate_not_empty(
+            provider_corp_external_ids,
+            "provider_corp_external_ids",
+            "Provider corporation external IDs list is required",
+        )
+        validate_not_empty(segment_uuid, "segment_uuid", "Segment UUID is required")
+
+        if (
+            not isinstance(provider_corp_external_ids, list)
+            or len(provider_corp_external_ids) == 0
+        ):
+            return build_error_response(
+                message="provider_corp_external_ids must be a non-empty list",
+                error_code=ErrorCode.VALIDATION_FAILED,
+            )
+
+        # Validate request status allows confirmation
+        current_request = self.get_rfq_request(request_uuid=request_uuid)
+        if error := propagate_error_if_present(current_request):
+            return error
+
+        current_status = current_request.get("status", "")
+        # Validate the transition to confirmed
+        RequestStatusTransitions.validate_transition(
+            current_status, RequestStatus.CONFIRMED
+        )
+
+        # Step 1: Update request status to confirmed
+        self.logger.info(f"Updating request {request_uuid} status to confirmed")
+
+        confirmed_request = self.update_rfq_request(
+            request_uuid=request_uuid, status=RequestStatus.CONFIRMED
+        )
+
+        if error := propagate_error_if_present(confirmed_request):
+            return error
+
+        # Step 2: Create quotes for each selected provider
+        created_quotes = []
+        failed_quotes = []
+
+        for provider_corp_external_id in provider_corp_external_ids:
+            self.logger.info(f"Creating quote for provider {provider_corp_external_id}")
+
+            try:
+                # Get sales rep email for this provider (if provided)
+                sales_rep_email = sales_rep_emails.get(provider_corp_external_id)
+
+                quote_result = self._create_quote(
+                    request_uuid=request_uuid,
+                    provider_corp_external_id=provider_corp_external_id,
+                    sales_rep_email=sales_rep_email,
+                    segment_uuid=segment_uuid,
+                )
+
+                if error := propagate_error_if_present(quote_result):
+                    failed_quotes.append(
+                        {
+                            "provider_corp_external_id": provider_corp_external_id,
+                            "error": error,
+                        }
+                    )
+                    self.logger.error(
+                        f"Failed to create quote for provider {provider_corp_external_id}: {error}"
+                    )
+                else:
+                    # Get full quote details including quote items
+                    quote_uuid = quote_result.get("quote_uuid")
+                    full_quote = self.get_quote(
+                        request_uuid=request_uuid, quote_uuid=quote_uuid
+                    )
+
+                    if error := propagate_error_if_present(full_quote):
+                        # If we can't get full details, use the basic quote result
+                        created_quotes.append(quote_result)
+                        self.logger.warning(
+                            f"Created quote {quote_uuid} but failed to get full details: {error}"
+                        )
+                    else:
+                        created_quotes.append(full_quote)
+
+                    self.logger.info(
+                        f"Successfully created quote {quote_uuid} for provider {provider_corp_external_id}"
+                    )
+
+            except Exception as e:
+                failed_quotes.append(
+                    {
+                        "provider_corp_external_id": provider_corp_external_id,
+                        "error": {"message": str(e)},
+                    }
+                )
+                self.logger.error(
+                    f"Exception creating quote for provider {provider_corp_external_id}: {e}"
+                )
+
+        # Return summary
+        result = {
+            "request": confirmed_request,
+            "created_quotes": created_quotes,
+            "total_quotes_created": len(created_quotes),
+            "total_quotes_requested": len(provider_corp_external_ids),
+        }
+
+        # Include failed quotes if any
+        if failed_quotes:
+            result["failed_quotes"] = failed_quotes
+            result["total_quotes_failed"] = len(failed_quotes)
+
+        self.logger.info(
+            f"Request confirmation completed: {len(created_quotes)}/{len(provider_corp_external_ids)} quotes created successfully"
+        )
+
+        return result
+
+    # * MCP Function.
+    @handle_errors(operation_name="confirm quote and create installments")
+    def confirm_quote_and_create_installments(
+        self, **arguments: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Confirm a selected quote and create installment plan.
+
+        This is a convenience method that:
+        1. Updates the quote status to 'confirmed'
+        2. Creates either a single installment for full amount or multiple installments
+        3. Returns confirmed quote and created installments
+
+        Args:
+            request_uuid: UUID of the request
+            quote_uuid: UUID of the quote to confirm
+            create_single_installment: If True, creates one installment for full amount (default: True)
+            interval_num: Number of installments (required if create_single_installment=False)
+            total_pay_period: Total payment period in months (required if create_single_installment=False)
+            payment_method: Optional payment method for installments
+
+        Returns:
+            Dictionary with confirmed quote and created installments
+        """
+        self.logger.info(f"Confirming quote and creating installments: {arguments}")
+
+        request_uuid = arguments["request_uuid"]
+        quote_uuid = arguments["quote_uuid"]
+        create_single_installment = arguments.get("create_single_installment", True)
+        payment_method = arguments.get("payment_method")
+
+        # Validate inputs
+        validate_not_empty(request_uuid, "request_uuid", "Request UUID is required")
+        validate_not_empty(quote_uuid, "quote_uuid", "Quote UUID is required")
+
+        if not create_single_installment:
+            interval_num = arguments.get("interval_num")
+            total_pay_period = arguments.get("total_pay_period")
+
+            validate_not_empty(
+                interval_num,
+                "interval_num",
+                "interval_num is required for multiple installments",
+            )
+            validate_not_empty(
+                total_pay_period,
+                "total_pay_period",
+                "total_pay_period is required for multiple installments",
+            )
+
+            if interval_num <= 0:
+                return build_error_response(
+                    message="interval_num must be greater than 0",
+                    error_code=ErrorCode.VALIDATION_FAILED,
+                )
+
+            if total_pay_period <= 0:
+                return build_error_response(
+                    message="total_pay_period must be greater than 0",
+                    error_code=ErrorCode.VALIDATION_FAILED,
+                )
+
+        # Validate quote status allows confirmation
+        current_quote = self.get_quote(request_uuid=request_uuid, quote_uuid=quote_uuid)
+        if error := propagate_error_if_present(current_quote):
+            return error
+
+        current_status = current_quote.get("status", "")
+        # Validate the transition to confirmed
+        QuoteStatusTransitions.validate_transition(
+            current_status, QuoteStatus.CONFIRMED
+        )
+
+        # Step 1: Update quote status to confirmed
+        self.logger.info(f"Updating quote {quote_uuid} status to confirmed")
+
+        confirmed_quote = self.update_quote(
+            request_uuid=request_uuid,
+            quote_uuid=quote_uuid,
+            status=QuoteStatus.CONFIRMED,
+        )
+
+        if error := propagate_error_if_present(confirmed_quote):
+            return error
+
+        # Step 2: Create installments
+        installments_result = None
+
+        if create_single_installment:
+            # Create single installment for full amount
+            self.logger.info(f"Creating single installment for full quote amount")
+
+            installment_args = {
+                "request_uuid": request_uuid,
+                "quote_uuid": quote_uuid,
+                "status": "pending",
+            }
+
+            if payment_method:
+                installment_args["payment_method"] = payment_method
+
+            installments_result = self._create_installment(**installment_args)
+
+            if error := propagate_error_if_present(installments_result):
+                return build_error_response(
+                    message=f"Quote confirmed but failed to create installment: {error.get('message', 'Unknown error')}",
+                    error_code=ErrorCode.OPERATION_FAILED,
+                    details={
+                        "confirmed_quote": confirmed_quote,
+                        "installment_error": error,
+                    },
+                )
+
+            # Wrap single installment in array for consistent response format
+            installments_result = {
+                "installments": [installments_result],
+                "total_created": 1,
+                "installment_amount_per": installments_result.get("installment_amount"),
+                "total_installment_amount": installments_result.get(
+                    "installment_amount"
+                ),
+            }
+
+        else:
+            # Create multiple installments
+            self.logger.info(
+                f"Creating {arguments['interval_num']} installments over {arguments['total_pay_period']} months"
+            )
+
+            installments_args = {
+                "request_uuid": request_uuid,
+                "quote_uuid": quote_uuid,
+                "interval_num": arguments["interval_num"],
+                "total_pay_period": arguments["total_pay_period"],
+            }
+
+            if payment_method:
+                installments_args["payment_method"] = payment_method
+
+            installments_result = self._create_installments(**installments_args)
+
+            if error := propagate_error_if_present(installments_result):
+                return build_error_response(
+                    message=f"Quote confirmed but failed to create installments: {error.get('message', 'Unknown error')}",
+                    error_code=ErrorCode.OPERATION_FAILED,
+                    details={
+                        "confirmed_quote": confirmed_quote,
+                        "installments_error": error,
+                    },
+                )
+
+        # Get updated quote with full details
+        final_quote = self.get_quote(request_uuid=request_uuid, quote_uuid=quote_uuid)
+
+        if error := propagate_error_if_present(final_quote):
+            # Use confirmed_quote if we can't get updated details
+            final_quote = confirmed_quote
+
+        # Return summary
+        result = {
+            "quote": final_quote,
+            "installments": installments_result.get("installments", []),
+            "total_installments_created": installments_result.get("total_created", 0),
+            "installment_amount_per": installments_result.get("installment_amount_per"),
+            "total_installment_amount": installments_result.get(
+                "total_installment_amount"
+            ),
+            "installment_type": "single" if create_single_installment else "multiple",
+        }
+
+        self.logger.info(
+            f"Quote confirmation completed: Quote {quote_uuid} confirmed with {result['total_installments_created']} installment(s) created"
+        )
+
+        return result
+
+    # * MCP Function.
     @handle_errors(operation_name="assign provider item to request item")
     def assign_provider_item_to_request_item(
         self, **arguments: Dict[str, Any]
@@ -868,8 +1190,20 @@ class MCPRfqProcessor:
     @handle_errors(operation_name="get provider items")
     def get_provider_items(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Search provider inventory.
+        Search provider inventory with batch information merged.
         Maps to GraphQL: providerItemList query
+
+        For each provider item, fetches and merges batch information including:
+        - batches: Array of batch details with slow_move_item flags and guardrail pricing
+        - Each batch includes: batch_no, expired_at, produced_at, slow_move_item, guardrail_price_per_uom
+
+        Optional batch filters (applied when fetching batches):
+        - expired_at_gt: Filter batches expiring after this date
+        - expired_at_lt: Filter batches expiring before this date
+        - slow_move_item: Filter for slow-moving inventory (default: False)
+        - in_stock: Filter for in-stock batches (default: True)
+
+        Note: If no expiration filters provided, defaults to batches expiring 90+ days from now.
         """
         variables = {
             "pageNumber": arguments.get("page_number", 1),
@@ -893,11 +1227,47 @@ class MCPRfqProcessor:
         if error := propagate_error_if_present(result):
             return error
 
-        return humps.decamelize(result["providerItemList"])
+        provider_items_result = humps.decamelize(result["providerItemList"])
+        provider_item_list = provider_items_result.get("provider_item_list", [])
 
-    # * MCP Function.
+        # Extract batch filter parameters from arguments (optional)
+        batch_expired_at_gt = arguments.get("expired_at_gt")
+        batch_expired_at_lt = arguments.get("expired_at_lt")
+        batch_slow_move_item = arguments.get("slow_move_item", False)
+        batch_in_stock = arguments.get("in_stock", True)
+
+        # Merge batch information into each provider item
+        for provider_item in provider_item_list:
+            provider_item_uuid = provider_item.get("provider_item_uuid")
+
+            if provider_item_uuid:
+                # Fetch batches for this provider item using the batch filter parameters
+                batch_arguments = {
+                    "provider_item_uuid": provider_item_uuid,
+                    "expired_at_gt": batch_expired_at_gt,
+                    "expired_at_lt": batch_expired_at_lt,
+                    "slow_move_item": batch_slow_move_item,
+                    "in_stock": batch_in_stock,
+                    "limit": 100,  # Get all batches for this item
+                }
+
+                batches_result = self._get_provider_item_batches(**batch_arguments)
+
+                # Check if batch fetch was successful
+                if not propagate_error_if_present(batches_result):
+                    batch_list = batches_result.get("provider_item_batch_list", [])
+                    provider_item["batches"] = batch_list
+                else:
+                    # If error fetching batches, set empty array
+                    provider_item["batches"] = []
+            else:
+                provider_item["batches"] = []
+
+        return provider_items_result
+
+    # * Private helper method (not exposed as MCP tool)
     @handle_errors(operation_name="get provider item batches")
-    def get_provider_item_batches(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+    def _get_provider_item_batches(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Get batch information for provider items.
         Maps to GraphQL: providerItemBatchList query
@@ -908,7 +1278,7 @@ class MCPRfqProcessor:
         - Batch details: expired_at, produced_at, cost breakdown
 
         Note: If neither expired_at_gt nor expired_at_lt is provided, defaults to
-        filtering batches expiring 3+ months from now (expired_at_gt = current_time + 3 months)
+        filtering batches expiring 90+ days from now.
         """
         from datetime import datetime, timedelta, timezone
 
@@ -954,9 +1324,9 @@ class MCPRfqProcessor:
 
     # ==================== Quote Management Tools ====================
 
-    # * MCP Function.
+    # * Private helper method (not exposed as MCP tool)
     @handle_errors(operation_name="create quote")
-    def create_quote(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+    def _create_quote(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Create new quote for RFQ request based on request items.
         Maps to GraphQL: insertUpdateQuote mutation
@@ -1145,11 +1515,14 @@ class MCPRfqProcessor:
     @handle_errors(operation_name="update quote item")
     def update_quote_item(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Update a specific quote item (quantity, discount, etc.).
+        Update an existing quote item (discount amount only).
         Maps to GraphQL: insertUpdateQuoteItem mutation
 
-        Can update quote item properties including discount.
-        To add/remove items, use add_quote_item or remove_quote_item.
+        Note: Only discount_amount can be updated. Other fields (qty, provider_item_uuid, etc.)
+        are read-only after creation. To modify other properties, remove and re-add the item.
+
+        Requirements:
+        - Quote must be in 'initial' or 'in_progress' status to modify items
 
         Response includes:
         - slow_move_item: Boolean flag indicating if item is from slow-moving inventory
@@ -1173,13 +1546,6 @@ class MCPRfqProcessor:
         variables = {
             "quoteUuid": arguments["quote_uuid"],
             "quoteItemUuid": arguments.get("quote_item_uuid"),
-            # "providerItemUuid": arguments.get("provider_item_uuid"),
-            # "itemUuid": arguments.get("item_uuid"),
-            # "segmentUuid": arguments.get("segment_uuid"),
-            # "batchNo": arguments.get("batch_no"),
-            # "requestUuid": arguments.get("request_uuid"),
-            # "requestData": arguments.get("request_data"),
-            # "qty": arguments.get("qty"),
             "subtotalDiscount": arguments.get("discount_amount", 0.0),
             "updatedBy": "MCP",
         }
@@ -1689,32 +2055,23 @@ class MCPRfqProcessor:
                             f"Provider item {provider_item_uuid} has invalid base_price_per_uom: {base_price_per_uom}"
                         )
 
-                    # Get batch-specific data and guardrail pricing
+                    # Get batch-specific data and guardrail pricing from embedded batches
                     slow_move_item = False
                     expired_at = None
                     batch_guardrail = None
 
                     if batch_no:
-                        batch_result = self.get_provider_item_batches(
-                            provider_item_uuid=provider_item_uuid,
-                            expired_at_gt="2000-01-01T00:00:00+0000",
-                            limit=100,
-                        )
+                        # Use the batches already embedded in provider_item_data
+                        batch_list = provider_item_data.get("batches", [])
 
-                        if not propagate_error_if_present(batch_result):
-                            batch_list = batch_result.get(
-                                "provider_item_batch_list", []
-                            )
-                            for batch_data in batch_list:
-                                if batch_data.get("batch_no") == batch_no:
-                                    batch_guardrail = batch_data.get(
-                                        "guardrail_price_per_uom"
-                                    )
-                                    slow_move_item = batch_data.get(
-                                        "slow_move_item", False
-                                    )
-                                    expired_at = batch_data.get("expired_at")
-                                    break
+                        for batch_data in batch_list:
+                            if batch_data.get("batch_no") == batch_no:
+                                batch_guardrail = batch_data.get(
+                                    "guardrail_price_per_uom"
+                                )
+                                slow_move_item = batch_data.get("slow_move_item", False)
+                                expired_at = batch_data.get("expired_at")
+                                break
 
                     # Set guardrail: base_price if no batch, else min(base_price, batch_guardrail)
                     if batch_no and batch_guardrail is not None:
@@ -1793,9 +2150,9 @@ class MCPRfqProcessor:
 
     # ==================== Installment Tools ====================
 
-    # * MCP Function.
+    # * Private helper method (not exposed as MCP tool)
     @handle_errors(operation_name="create installment")
-    def create_installment(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+    def _create_installment(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Create payment installment.
         Maps to GraphQL: insertUpdateInstallment mutation
@@ -2059,9 +2416,9 @@ class MCPRfqProcessor:
 
         return installment
 
-    # * MCP Function.
+    # * Private helper method (not exposed as MCP tool)
     @handle_errors(operation_name="create installments")
-    def create_installments(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
+    def _create_installments(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Create multiple payment installments based on payment schedule.
         Maps to GraphQL: insertUpdateInstallment mutation (called multiple times)

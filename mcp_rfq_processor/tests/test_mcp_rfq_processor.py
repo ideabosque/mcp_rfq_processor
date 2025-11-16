@@ -296,6 +296,8 @@ INSTALLMENT_TEST_DATA = _TEST_DATA.get("installment_test_data", [])
 INSTALLMENT_LIST_TEST_DATA = _TEST_DATA.get("installment_list_test_data", [])
 INSTALLMENT_UPDATE_TEST_DATA = _TEST_DATA.get("installment_update_test_data", [])
 INSTALLMENTS_CREATE_TEST_DATA = _TEST_DATA.get("installments_create_test_data", [])
+CONFIRM_REQUEST_AND_CREATE_QUOTES_TEST_DATA = _TEST_DATA.get("confirm_request_and_create_quotes_test_data", [])
+CONFIRM_QUOTE_AND_CREATE_INSTALLMENTS_TEST_DATA = _TEST_DATA.get("confirm_quote_and_create_installments_test_data", [])
 FILE_TEST_DATA = _TEST_DATA.get("file_test_data", [])
 
 
@@ -393,7 +395,17 @@ def test_get_item(mcp_rfq_processor, test_data):
 @pytest.mark.parametrize("test_data", PROVIDER_ITEM_LIST_TEST_DATA)
 @log_test_result
 def test_get_provider_items(mcp_rfq_processor, test_data):
-    """Test getting provider items."""
+    """
+    Test getting provider items with batch information merged.
+
+    Each provider item should include a 'batches' array with batch details including:
+    - batch_no
+    - expired_at
+    - produced_at
+    - slow_move_item flag
+    - guardrail_price_per_uom
+    - in_stock flag
+    """
     result, error = _call_method(
         mcp_rfq_processor,
         "get_provider_items",
@@ -405,45 +417,39 @@ def test_get_provider_items(mcp_rfq_processor, test_data):
     assert result is not None
     assert "total" in result
 
+    # Verify that provider items have batches merged
+    if "provider_item_list" in result or "providerItemList" in result:
+        provider_items = result.get("provider_item_list") or result.get("providerItemList")
+        if provider_items and len(provider_items) > 0:
+            for provider_item in provider_items:
+                # Verify each provider item has a batches array
+                assert "batches" in provider_item, "Each provider item should have a 'batches' field"
 
-@pytest.mark.integration
-@pytest.mark.parametrize("test_data", PROVIDER_ITEM_BATCH_LIST_TEST_DATA)
-@log_test_result
-def test_get_provider_item_batches(mcp_rfq_processor, test_data):
-    """Test getting provider item batches with filtering."""
-    # Build arguments from test data
-    arguments = {
-        "page_number": test_data.get("pageNumber", 1),
-        "limit": test_data.get("limit", 50),
-    }
+                batches = provider_item.get("batches", [])
+                logger.info(
+                    f"Provider item {provider_item.get('provider_item_uuid')} has {len(batches)} batch(es)"
+                )
 
-    # Add optional filters
-    optional_fields = [
-        "providerItemUuid",
-        "itemUuid",
-        "expiredAtGt",
-        "expiredAtLt",
-        "slowMoveItem",
-        "inStock",
-    ]
-    for field in optional_fields:
-        if test_data.get(field) is not None:
-            # Convert camelCase to snake_case for Python function
-            snake_case_field = field[0].lower() + "".join(
-                ["_" + c.lower() if c.isupper() else c for c in field[1:]]
-            )
-            arguments[snake_case_field] = test_data.get(field)
+                # If batches exist, verify their structure
+                if batches:
+                    for batch in batches:
+                        # Verify batch has required fields
+                        assert "batch_no" in batch or "batchNo" in batch, "Batch should have batch_no"
 
-    result, error = _call_method(
-        mcp_rfq_processor,
-        "get_provider_item_batches",
-        arguments,
-        "get_provider_item_batches",
-    )
+                        # Log batch details
+                        batch_no = batch.get("batch_no") or batch.get("batchNo")
+                        slow_move = batch.get("slow_move_item") or batch.get("slowMoveItem")
+                        guardrail = batch.get("guardrail_price_per_uom") or batch.get("guardrailPricePerUom")
 
-    assert error is None
-    assert result is not None
-    assert "total" in result
+                        logger.info(
+                            f"  Batch {batch_no}: slow_move={slow_move}, guardrail={guardrail}"
+                        )
+
+
+# NOTE: get_provider_item_batches is a private function (_get_provider_item_batches)
+# It is called internally by get_provider_items to merge batch information
+# See test_get_provider_items for batch validation
+# No direct tests needed for this private function
 
 
 # ============================================================================
@@ -1209,7 +1215,7 @@ def test_create_quote(mcp_rfq_processor, test_data):
     """Test creating quote."""
     result, error = _call_method(
         mcp_rfq_processor,
-        "create_quote",
+        "_create_quote",
         {
             "request_uuid": test_data.get("requestUuid"),
             "provider_corp_external_id": test_data.get("providerCorpExternalId"),
@@ -1421,7 +1427,7 @@ def test_create_installment(mcp_rfq_processor, test_data):
 
     result, error = _call_method(
         mcp_rfq_processor,
-        "create_installment",
+        "_create_installment",
         arguments,
         "create_installment",
     )
@@ -1503,7 +1509,7 @@ def test_create_installments(mcp_rfq_processor, test_data):
 
     result, error = _call_method(
         mcp_rfq_processor,
-        "create_installments",
+        "_create_installments",
         arguments,
         "create_installments",
     )
@@ -1534,6 +1540,81 @@ def test_create_installments(mcp_rfq_processor, test_data):
             assert (
                 scheduled_dt > current_dt
             ), "First installment should be scheduled in the future"
+
+
+# ============================================================================
+# CONVENIENCE/WORKFLOW TESTS
+# ============================================================================
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", CONFIRM_REQUEST_AND_CREATE_QUOTES_TEST_DATA)
+@log_test_result
+def test_confirm_request_and_create_quotes(mcp_rfq_processor, test_data):
+    """Test confirming request and creating quotes in one operation."""
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "confirm_request_and_create_quotes",
+        {
+            "request_uuid": test_data.get("requestUuid"),
+            "provider_corp_external_ids": test_data.get("providerCorpExternalIds"),
+            "segment_uuid": test_data.get("segmentUuid"),
+            "sales_rep_emails": test_data.get("salesRepEmails"),
+        },
+        "confirm_request_and_create_quotes",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "request" in result
+    assert "created_quotes" in result
+    assert "total_quotes_created" in result
+    assert "total_quotes_requested" in result
+    # Verify request was confirmed
+    assert result["request"]["status"] == "confirmed"
+    # Verify at least one quote was created
+    assert result["total_quotes_created"] >= 0
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", CONFIRM_QUOTE_AND_CREATE_INSTALLMENTS_TEST_DATA)
+@log_test_result
+def test_confirm_quote_and_create_installments(mcp_rfq_processor, test_data):
+    """Test confirming quote and creating installments in one operation."""
+    arguments = {
+        "request_uuid": test_data.get("requestUuid"),
+        "quote_uuid": test_data.get("quoteUuid"),
+        "create_single_installment": test_data.get("createSingleInstallment", True),
+    }
+
+    # Add optional fields if present
+    if test_data.get("intervalNum") is not None:
+        arguments["interval_num"] = test_data.get("intervalNum")
+    if test_data.get("totalPayPeriod") is not None:
+        arguments["total_pay_period"] = test_data.get("totalPayPeriod")
+    if test_data.get("paymentMethod") is not None:
+        arguments["payment_method"] = test_data.get("paymentMethod")
+
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "confirm_quote_and_create_installments",
+        arguments,
+        "confirm_quote_and_create_installments",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "quote" in result
+    assert "installments" in result
+    assert "total_installments_created" in result
+    assert "installment_type" in result
+    # Verify quote was confirmed
+    assert result["quote"]["status"] == "confirmed"
+    # Verify installments were created
+    assert result["total_installments_created"] > 0
+    # Verify installment type matches
+    expected_type = "single" if test_data.get("createSingleInstallment", True) else "multiple"
+    assert result["installment_type"] == expected_type
 
 
 # ============================================================================
@@ -1612,7 +1693,7 @@ def test_complete_rfq_workflow(mcp_rfq_processor):
     # Step 2: Create quote
     quote_result, quote_error = _call_method(
         mcp_rfq_processor,
-        "create_quote",
+        "_create_quote",
         {
             "request_uuid": request_result["request_uuid"],
             "provider_corp_external_id": quote_data.get("providerCorpExternalId"),

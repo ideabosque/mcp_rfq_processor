@@ -14,7 +14,7 @@ The MCP RFQ Processor connects AI assistants to the `ai_rfq_engine` GraphQL back
 - **Segment Management**: Organize customers and providers into pricing segments
 
 **Current Version**: 1.1.0
-**Total MCP Tools**: 25 (fully implemented and tested)
+**Total MCP Tools**: 26 (fully implemented and tested)
 
 ### What's New in v1.1.0
 
@@ -296,7 +296,17 @@ Get detailed information about a specific item.
 **Output:** Complete item details including pricing tiers.
 
 #### `get_provider_items`
-Search provider inventory for specific items.
+Search provider inventory with batch information merged.
+
+For each provider item, automatically fetches and merges batch information including:
+- **batches**: Array of batch details with slow_move_item flags and guardrail pricing
+- Each batch includes: batch_no, expired_at, produced_at, slow_move_item, guardrail_price_per_uom
+
+Optional batch filters (applied when fetching batches):
+- **expired_at_gt**: Filter batches expiring after this date
+- **expired_at_lt**: Filter batches expiring before this date  
+- **slow_move_item**: Filter for slow-moving inventory (default: false)
+- **in_stock**: Filter for in-stock batches (default: true)
 
 **Input:**
 ```json
@@ -305,12 +315,33 @@ Search provider inventory for specific items.
   "provider_corp_external_id": "PROVIDER-001",
   "min_base_price_per_uom": 10.00,
   "max_base_price_per_uom": 50.00,
+  "expired_at_gt": "2025-11-05T00:00:00Z",
+  "slow_move_item": false,
+  "in_stock": true,
   "page_number": 1,
   "limit": 50
 }
 ```
 
-**Output:** List of provider items with pricing, availability, and batch info.
+**Output:** List of provider items with pricing, availability, and merged batch information.
+
+**Note:** If no expiration filters provided, defaults to batches expiring 90+ days from now.
+
+#### `get_provider_item_batches`
+Get batch/lot information for provider items including slow_move_item flag and guardrail pricing.
+
+**Input:**
+```json
+{
+  "provider_item_uuid": "provider-item-uuid",
+  "in_stock": true,
+  "expired_at_gt": "2025-11-05T00:00:00Z"
+}
+```
+
+**Output:** List of batches with lot numbers, expiry dates, and stock levels.
+
+**Note:** If neither expired_at_gt nor expired_at_lt is provided, defaults to filtering batches expiring 90+ days from now.
 
 #### `get_provider_item_batches`
 Get batch information for provider inventory.
