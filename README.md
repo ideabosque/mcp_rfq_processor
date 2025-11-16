@@ -13,25 +13,28 @@ The MCP RFQ Processor connects AI assistants to the `ai_rfq_engine` GraphQL back
 - **Document Management**: Upload and track RFQ-related files
 - **Segment Management**: Organize customers and providers into pricing segments
 
-**Current Version**: 0.1.1  
-**Total MCP Tools**: 26 (fully implemented and tested)
+**Current Version**: 0.1.0  
+**Total MCP Tools**: 25 (fully implemented and tested)
 
-### What's New in v0.1.1
+### What's New in v0.1.0
 
 **Major Features:**
+- **Complete RFQ Workflow**: End-to-end request for quotation processing from customer inquiry to final quote submission
 - **NEW: `calculate_quote_pricing` Tool**: Groups request items by provider/segment, returns pricing with applicable discount rules and price tiers for LLM-driven decision making
-- **Enhanced Pricing Filters**: `get_item_price_tiers` and `get_discount_rules` now support quantity/subtotal filtering parameters
-- **14-Step RFQ to Quote Workflow**: Comprehensive workflow guide from customer inquiry to final quote submission
+- **Enhanced Pricing Filters**: `get_item_price_tiers` and `get_discount_rules` support quantity/subtotal filtering parameters
+- **Flexible Quote Management**: Direct quote item operations (add/update/remove) for better usability
+- **Comprehensive Testing**: 1008 lines of unit tests covering all 25 tools
 
-**Backend Integration Updates:**
+**Backend Integration Features:**
 - **Slow Move Item Tracking**: Automatically identify slow-moving inventory with `slow_move_item` flag and guardrail pricing
-- **Auto-calculated Negotiation Rounds**: Backend now automatically tracks quote `rounds` per provider (renamed from `negociation_rounds`)
-- **Auto-calculated Installment Ratio**: `installment_ratio` is now computed automatically based on `installment_amount` and quote total
+- **Auto-calculated Negotiation Rounds**: Backend automatically tracks quote `rounds` per provider
+- **Auto-calculated Installment Ratio**: `installment_ratio` computed automatically based on `installment_amount` and quote total
 - **Simplified Quote Creation**: `shipping_method` and `shipping_amount` can only be set via `update_quote`, not during creation
 
-**Streamlined Tools (27→25):**
+**Streamlined Tools (25 total):**
 - **Removed**: `create_segment` and `add_contact_to_segment` (segments managed via backend admin)
 - **Kept**: `get_segment_contacts` for read-only segment lookups
+- **Added**: Convenience methods `add_item_to_rfq_request` and `remove_item_from_rfq_request`
 
 See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for complete workflow documentation.
 
@@ -448,7 +451,7 @@ Retrieve tiered pricing for an item.
 
 **Output:** List of price tiers (quantity ranges and prices).
 
-**NEW in v0.1.1**: Added quantity and price filter parameters for more precise tier selection.
+**NEW in v0.1.0**: Added quantity and price filter parameters for more precise tier selection.
 
 #### `get_discount_rules`
 Get applicable discount rules.
@@ -472,10 +475,10 @@ Get applicable discount rules.
 
 **Output:** List of discount rules with conditions and percentages.
 
-**NEW in v0.1.1**: Added subtotal and percentage filter parameters for more precise rule selection.
+**NEW in v0.1.0**: Added subtotal and percentage filter parameters for more precise rule selection.
 
 #### `calculate_quote_pricing`
-**NEW in v0.1.1**: Calculate grouped pricing from request with provider_items, returning applicable discount rules and price tiers for LLM-driven decision making.
+**NEW in v0.1.0**: Calculate grouped pricing from request with provider_items, returning applicable discount rules and price tiers for LLM-driven decision making.
 
 **Note**: This reads from REQUEST (not quote) and groups items by (provider_corp_external_id, segment_uuid). Use this BEFORE creating quotes (Step 7 in workflow).
 
