@@ -13,17 +13,37 @@ The MCP RFQ Processor connects AI assistants to the `ai_rfq_engine` GraphQL back
 - **Document Management**: Upload and track RFQ-related files
 - **Segment Management**: Organize customers and providers into pricing segments
 
-**Current Version**: 0.1.0  
+**Current Version**: 1.1.0
 **Total MCP Tools**: 25 (fully implemented and tested)
 
-### What's New in v0.1.0
+### What's New in v1.1.0
+
+**Status Management System:**
+- **NEW: Comprehensive Status Management**: Enforces request/quote/installment status flows with transition validation
+- **Status Constants**: RequestStatus, QuoteStatus, InstallmentStatus classes for type-safe status values
+- **Automatic Business Rules**:
+  - Auto-disapprove all quotes when request is modified
+  - Auto-complete quote when all installments are paid
+  - Auto-transition request to "in_progress" when items are modified
+- **Operation Guards**: Prevent invalid operations (e.g., can't create quotes from non-confirmed requests)
+- **Default Status Values**: Requests default to "initial", quotes default to "initial"
+
+**API Improvements:**
+- **Simplified Price Tier Lookup**: `get_item_price_tiers` now uses `quantity_value` parameter (finds matching tier for specific quantity)
+- **Simplified Discount Rules**: `get_discount_rules` now uses `subtotal_value` parameter with required item/provider/segment parameters
+- **Item-Level Discount Rules**: `calculate_quote_pricing` returns discount rules per item (based on item subtotal) instead of group-level
+
+**Enhanced Testing:**
+- Updated test suite to validate status transitions and business rules
+- Tests for item-level discount rules in quote pricing
+
+### v0.1.0 Features
 
 **Major Features:**
 - **Complete RFQ Workflow**: End-to-end request for quotation processing from customer inquiry to final quote submission
-- **NEW: `calculate_quote_pricing` Tool**: Groups request items by provider/segment, returns pricing with applicable discount rules and price tiers for LLM-driven decision making
-- **Enhanced Pricing Filters**: `get_item_price_tiers` and `get_discount_rules` support quantity/subtotal filtering parameters
+- **`calculate_quote_pricing` Tool**: Groups request items by provider/segment, returns pricing with applicable discount rules and price tiers for LLM-driven decision making
 - **Flexible Quote Management**: Direct quote item operations (add/update/remove) for better usability
-- **Comprehensive Testing**: 1008 lines of unit tests covering all 25 tools
+- **Comprehensive Testing**: Unit tests covering all 25 tools
 
 **Backend Integration Features:**
 - **Slow Move Item Tracking**: Automatically identify slow-moving inventory with `slow_move_item` flag and guardrail pricing
@@ -137,6 +157,8 @@ All 25 tools are fully implemented and production-ready.
 #### `submit_rfq_request`
 Submit a new RFQ request from a customer.
 
+**Default Status**: `initial` - Request has been created but not yet being worked on.
+
 **Input:**
 ```json
 {
@@ -148,7 +170,7 @@ Submit a new RFQ request from a customer.
   "items": [],
   "notes": "Urgent order",
   "expired_at": "2025-12-31T23:59:59Z",
-  "status": "pending"
+  "status": "initial"
 }
 ```
 
@@ -156,7 +178,7 @@ Submit a new RFQ request from a customer.
 ```json
 {
   "request_uuid": "generated-uuid",
-  "status": "pending",
+  "status": "initial",
   "created_at": "2025-11-05T10:30:00Z",
   "items": []
 }
@@ -165,13 +187,19 @@ Submit a new RFQ request from a customer.
 #### `update_rfq_request`
 Update an existing RFQ request (title, description, addresses, items, status, etc.).
 
+**Status Transitions**: All status changes are validated according to the request status flow.
+
+**Automatic Business Rules**:
+- When status changes to `modified`, all related quotes are automatically set to `disapproved`
+- When items are modified while in `modified` status, automatically transitions to `in_progress`
+
 **Input:**
 ```json
 {
   "request_uuid": "request-uuid-string",
   "request_title": "Updated title",
   "items": [...],
-  "status": "modified"
+  "status": "confirmed"
 }
 ```
 
@@ -305,6 +333,11 @@ Get batch information for provider inventory.
 #### `create_quote`
 Generate a new quote for an RFQ request.
 
+**Default Status**: `initial` - Quote has been created but not yet being worked on.
+
+**Requirements**:
+- Request must be in `confirmed` status to create quotes
+
 **Note**:
 - `shipping_method` and `shipping_amount` cannot be set during creation - use `update_quote` after creation
 - `rounds` (negotiation rounds) is auto-calculated by the backend
@@ -315,7 +348,7 @@ Generate a new quote for an RFQ request.
   "request_uuid": "request-uuid",
   "provider_corp_external_id": "PROVIDER-001",
   "sales_rep_email": "sales@provider.com",
-  "status": "draft",
+  "status": "initial",
   "notes": "Initial quote"
 }
 ```
@@ -327,7 +360,7 @@ Generate a new quote for an RFQ request.
   "request_uuid": "request-uuid",
   "rounds": 0,
   "total_quote_amount": 0.00,
-  "status": "draft"
+  "status": "initial"
 }
 ```
 
@@ -347,6 +380,8 @@ Retrieve quote details.
 #### `update_quote`
 Update quote metadata (shipping, status, notes).
 
+**Status Transitions**: All status changes are validated according to the quote status flow.
+
 **Note**: `rounds` (negotiation rounds) is auto-calculated by the backend and cannot be manually set.
 
 **Input:**
@@ -356,7 +391,7 @@ Update quote metadata (shipping, status, notes).
   "quote_uuid": "quote-uuid",
   "shipping_method": "express",
   "shipping_amount": 75.00,
-  "status": "submitted",
+  "status": "confirmed",
   "notes": "Updated pricing and shipping"
 }
 ```
@@ -383,6 +418,9 @@ Search and filter quotes.
 #### `add_quote_item`
 Add a line item to an existing quote.
 
+**Requirements**:
+- Quote must be in `initial` or `in_progress` status to modify items
+
 **Input:**
 ```json
 {
@@ -398,32 +436,23 @@ Add a line item to an existing quote.
 **Output:** Created quote item with calculated totals.
 
 #### `update_quote_item`
-Update an existing quote item (quantity, discount, etc.).
+Update an existing quote item (discount amount only).
+
+**Requirements**:
+- Quote must be in `initial` or `in_progress` status to modify items
+
+**Note**: Only `discount_amount` can be updated. Other fields (qty, provider_item_uuid, etc.) are read-only after creation.
 
 **Input:**
 ```json
 {
   "quote_uuid": "quote-uuid",
   "quote_item_uuid": "quote-item-uuid",
-  "qty": 150,
   "discount_amount": 75.00
 }
 ```
 
 **Output:** Updated quote item with recalculated totals.
-
-#### `remove_quote_item`
-Remove a line item from a quote.
-
-**Input:**
-```json
-{
-  "quote_uuid": "quote-uuid",
-  "quote_item_uuid": "quote-item-uuid"
-}
-```
-
-**Output:** Confirmation of deletion.
 
 ---
 
@@ -440,45 +469,53 @@ Retrieve tiered pricing for an item.
   "item_uuid": "item-uuid",
   "provider_item_uuid": "optional-provider-item-uuid",
   "segment_uuid": "optional-segment-uuid",
-  "min_quantity_greater_then": "optional-int",
-  "max_quantity_greater_then": "optional-int",
-  "min_quantity_less_then": "optional-int",
-  "max_quantity_less_then": "optional-int",
+  "quantity_value": 100,
   "min_price": "optional-float",
   "max_price": "optional-float"
 }
 ```
 
+**Parameters:**
+- `quantity_value`: Find the price tier that matches this specific quantity (finds tiers where quantity_greater_then <= value < quantity_less_then)
+- Other filters available for price range exploration
+
 **Output:** List of price tiers (quantity ranges and prices).
 
-**NEW in v0.1.0**: Added quantity and price filter parameters for more precise tier selection.
+**Updated in v1.1.0**: Simplified to use `quantity_value` parameter instead of min/max filters for finding matching tiers.
 
 #### `get_discount_rules`
-Get applicable discount rules.
+Get applicable discount rules for item-level pricing.
 
-**Note**: Typically used via `calculate_quote_pricing` which automatically filters by group subtotal. Direct use available for LLM-driven discount exploration.
+**Note**: Typically used via `calculate_quote_pricing` which automatically filters by item subtotal. Direct use available for LLM-driven discount exploration.
 
 **Input:**
 ```json
 {
   "item_uuid": "item-uuid",
-  "provider_item_uuid": "optional-provider-item-uuid",
-  "segment_uuid": "optional-segment-uuid",
-  "max_subtotal_greater_than": "optional-float",
-  "min_subtotal_greater_than": "optional-float",
-  "max_subtotal_less_than": "optional-float",
-  "min_subtotal_less_than": "optional-float",
+  "provider_item_uuid": "provider-item-uuid",
+  "segment_uuid": "segment-uuid",
+  "subtotal_value": 1000.0,
   "max_discount_percentage": "optional-float",
   "min_discount_percentage": "optional-float"
 }
 ```
 
-**Output:** List of discount rules with conditions and percentages.
+**Required Parameters:**
+- `item_uuid`: Item UUID (required for item-specific discount rules)
+- `provider_item_uuid`: Provider item UUID (required for provider-specific pricing)
+- `segment_uuid`: Customer segment UUID (required for segment-specific pricing)
 
-**NEW in v0.1.0**: Added subtotal and percentage filter parameters for more precise rule selection.
+**Optional Parameters:**
+- `subtotal_value`: Find rules applicable to a specific subtotal amount (finds rules where subtotal_greater_than <= value < subtotal_less_than)
+- `max_discount_percentage`: Filter by maximum discount percentage threshold
+- `min_discount_percentage`: Filter by minimum discount percentage threshold
+
+**Output:** List of discount rules with conditions and percentages (only 'active' status).
+
+**Updated in v1.1.0**: Simplified to use `subtotal_value` parameter and made item/provider/segment parameters required.
 
 #### `calculate_quote_pricing`
-**NEW in v0.1.0**: Calculate grouped pricing from request with provider_items, returning applicable discount rules and price tiers for LLM-driven decision making.
+Calculate grouped pricing from request with provider_items, returning applicable discount rules and price tiers for LLM-driven decision making.
 
 **Note**: This reads from REQUEST (not quote) and groups items by (provider_corp_external_id, segment_uuid). Use this BEFORE creating quotes (Step 7 in workflow).
 
@@ -490,7 +527,7 @@ Get applicable discount rules.
 }
 ```
 
-**Output:** Grouped pricing structure with discount rules and price tiers.
+**Output:** Grouped pricing structure with item-level discount rules and price tiers.
 
 ```json
 {
@@ -499,7 +536,6 @@ Get applicable discount rules.
   "groups": [
     {
       "provider_corp_external_id": "PROVIDER-001",
-      "segment_uuid": "seg-uuid",
       "items": [
         {
           "item_uuid": "item-uuid",
@@ -510,11 +546,11 @@ Get applicable discount rules.
           "guardrail_price_per_uom": 9.50,
           "slow_move_item": true,
           "subtotal": 4750.00,
-          "price_tiers": [...]
+          "price_tiers": [...],
+          "discount_rules": [...]
         }
       ],
-      "subtotal": 4750.00,
-      "discount_rules": [...]
+      "subtotal": 4750.00
     }
   ],
   "subtotal": 4750.00
@@ -522,10 +558,12 @@ Get applicable discount rules.
 ```
 
 **Key Features:**
-- Groups items by provider and segment for multi-provider comparison
-- Returns discount_rules and price_tiers WITHOUT applying them
+- Groups items by provider for multi-provider comparison
+- Returns item-level discount_rules (based on item subtotal) and price_tiers WITHOUT applying them
 - LLM presents options to user and applies discounts only after confirmation
 - Includes batch-specific pricing with slow_move_item flags
+
+**Updated in v1.1.0**: Discount rules moved to item-level (based on item subtotal) instead of group-level.
 
 ---
 
@@ -534,10 +572,13 @@ Get applicable discount rules.
 #### `create_installment`
 Set up a payment installment for a quote.
 
+**Requirements**:
+- Quote must be in `confirmed` status to create installments
+
 **Workflow:**
 - Create installments with `status=pending` when quote status changes to `confirmed`
 - Update installment `status=paid` when payment is received
-- When all installments are `paid`, update quote status to `completed`
+- When all installments are `paid`, quote status is automatically set to `completed`
 
 **Automatic Behavior:**
 - **Amount**: If `installment_amount` not provided, uses full remaining balance. If provided, uses `min(requested_amount, remaining_balance)` (auto-caps at remaining balance)
@@ -585,6 +626,11 @@ Set up a payment installment for a quote.
 #### `update_installment`
 Update installment status and sales order number.
 
+**Status Transitions**: All status changes are validated according to the installment status flow.
+
+**Automatic Business Rules**:
+- When all installments are marked as `paid`, the quote is automatically set to `completed`
+
 **Use Cases:**
 - Mark installment as `paid` when payment is received
 - Mark installment as `cancelled` if payment is cancelled or refunded
@@ -602,7 +648,7 @@ Update installment status and sales order number.
 
 **Common Usage:**
 ```json
-// Mark as paid
+// Mark as paid (triggers auto-complete check)
 {
   "quote_uuid": "quote-uuid",
   "installment_uuid": "installment-uuid",

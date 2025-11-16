@@ -604,21 +604,9 @@ MCP_CONFIGURATION = {
                         "type": "string",
                         "description": "Filter by customer segment UUID",
                     },
-                    "min_quantity_greater_then": {
+                    "quantity_value": {
                         "type": "number",
-                        "description": "Filter tiers where quantity_greater_then is at least this value",
-                    },
-                    "max_quantity_greater_then": {
-                        "type": "number",
-                        "description": "Filter tiers where quantity_greater_then is at most this value (use to find tiers applicable to a specific quantity)",
-                    },
-                    "min_quantity_less_then": {
-                        "type": "number",
-                        "description": "Filter tiers where quantity_less_then is at least this value (use to find tiers applicable to a specific quantity)",
-                    },
-                    "max_quantity_less_then": {
-                        "type": "number",
-                        "description": "Filter tiers where quantity_less_then is at most this value",
+                        "description": "Find the price tier that matches this specific quantity value (finds tiers where quantity_greater_then <= value < quantity_less_then)",
                     },
                     "min_price": {
                         "type": "number",
@@ -657,21 +645,9 @@ MCP_CONFIGURATION = {
                         "type": "string",
                         "description": "Filter by customer segment UUID",
                     },
-                    "max_subtotal_greater_than": {
+                    "subtotal_value": {
                         "type": "number",
-                        "description": "Filter rules where subtotal_greater_than is at most this value",
-                    },
-                    "min_subtotal_greater_than": {
-                        "type": "number",
-                        "description": "Filter rules where subtotal_greater_than is at least this value",
-                    },
-                    "max_subtotal_less_than": {
-                        "type": "number",
-                        "description": "Filter rules where subtotal_less_than is at most this value",
-                    },
-                    "min_subtotal_less_than": {
-                        "type": "number",
-                        "description": "Filter rules where subtotal_less_than is at least this value",
+                        "description": "Find the discount rule that matches this specific subtotal value (finds rules where subtotal_greater_than <= value < subtotal_less_than)",
                     },
                     "max_discount_percentage": {
                         "type": "number",

@@ -23,6 +23,21 @@ from .error_handler import (
 from .graphql_client import GraphQLClient
 from .mcp_configuration import MCP_CONFIGURATION
 
+# Import status management
+from .status_manager import (
+    InstallmentStatus,
+    InstallmentStatusTransitions,
+    QuoteOperationGuard,
+    QuoteStatus,
+    QuoteStatusTransitions,
+    RequestOperationGuard,
+    RequestStatus,
+    RequestStatusTransitions,
+    should_quote_be_completed,
+    should_quotes_be_disapproved,
+    should_request_be_in_progress,
+)
+
 
 class MCPRfqProcessor:
     def __init__(self, logger: logging.Logger, **setting: Dict[str, Any]):
@@ -49,6 +64,68 @@ class MCPRfqProcessor:
             function_name, operation_name, operation_type, variables
         )
 
+    def _disapprove_all_quotes_for_request(self, request_uuid: str) -> None:
+        """
+        Disapprove all quotes associated with a request.
+
+        This implements the critical business rule:
+        "When a request status changes to 'modified', all related quotes
+        (regardless of their current status) are automatically changed to 'disapproved'"
+
+        Args:
+            request_uuid: UUID of the request whose quotes should be disapproved
+        """
+        self.logger.info(f"Auto-disapproving all quotes for request {request_uuid}")
+
+        # Get all quotes for this request
+        quotes_result = self.search_quotes(request_uuid=request_uuid, limit=100)
+
+        # Check for errors
+        if error := propagate_error_if_present(quotes_result):
+            self.logger.error(f"Failed to fetch quotes for auto-disapproval: {error}")
+            return
+
+        quote_list = quotes_result.get("quote_list", [])
+
+        if not quote_list:
+            self.logger.info(f"No quotes found for request {request_uuid}")
+            return
+
+        # Disapprove each quote (except those already disapproved)
+        disapproved_count = 0
+        for quote in quote_list:
+            quote_uuid = quote.get("quote_uuid")
+            current_status = quote.get("status", "")
+
+            # Skip if already disapproved
+            if current_status == QuoteStatus.DISAPPROVED:
+                continue
+
+            # Update quote status to disapproved
+            try:
+                update_result = self.update_quote(
+                    request_uuid=request_uuid,
+                    quote_uuid=quote_uuid,
+                    status=QuoteStatus.DISAPPROVED,
+                    notes=f"Auto-disapproved: Request was modified",
+                )
+
+                if error := propagate_error_if_present(update_result):
+                    self.logger.error(
+                        f"Failed to disapprove quote {quote_uuid}: {error}"
+                    )
+                else:
+                    disapproved_count += 1
+                    self.logger.info(
+                        f"Disapproved quote {quote_uuid} (was {current_status})"
+                    )
+            except Exception as e:
+                self.logger.error(f"Error disapproving quote {quote_uuid}: {e}")
+
+        self.logger.info(
+            f"Auto-disapproved {disapproved_count} quote(s) for request {request_uuid}"
+        )
+
     # ==================== Request Management Tools ====================
 
     # * MCP Function.
@@ -57,6 +134,8 @@ class MCPRfqProcessor:
         """
         Submit new RFQ request.
         Maps to GraphQL: insertUpdateRequest mutation
+
+        Default status: 'initial' - Request has been created but not yet being worked on.
         """
         self.logger.info(f"Submitting RFQ request: {arguments}")
 
@@ -69,7 +148,7 @@ class MCPRfqProcessor:
             "items": arguments.get("items"),
             "notes": arguments.get("notes"),
             "expiredAt": arguments.get("expired_at"),
-            "status": arguments.get("status", "pending"),
+            "status": arguments.get("status", RequestStatus.INITIAL),
             "updatedBy": "MCP",
         }
 
@@ -105,8 +184,23 @@ class MCPRfqProcessor:
 
         Note: You can also use add_item_to_rfq_request or remove_item_from_rfq_request
         for individual item modifications.
+
+        Status transitions are validated according to the request status flow.
         """
         self.logger.info(f"Updating RFQ request: {arguments}")
+
+        # Get current request to check current status
+        current_request = self.get_rfq_request(request_uuid=arguments["request_uuid"])
+        if error := propagate_error_if_present(current_request):
+            return error
+
+        current_status = current_request.get("status", "")
+
+        # Validate status transition if status is being updated
+        if "status" in arguments:
+            new_status = arguments["status"]
+            # Validate the transition
+            RequestStatusTransitions.validate_transition(current_status, new_status)
 
         variables = {
             "requestUuid": arguments["request_uuid"],
@@ -137,6 +231,16 @@ class MCPRfqProcessor:
             return error
 
         request = humps.decamelize(result["insertUpdateRequest"]["request"])
+
+        # Critical Business Rule: Auto-disapprove quotes if request status changed to 'modified'
+        new_status = request.get("status", "")
+        if should_quotes_be_disapproved(new_status):
+            request_uuid = arguments["request_uuid"]
+            self.logger.info(
+                f"Request {request_uuid} status changed to '{new_status}', "
+                f"triggering auto-disapproval of all quotes"
+            )
+            self._disapprove_all_quotes_for_request(request_uuid)
 
         return request
 
@@ -252,12 +356,25 @@ class MCPRfqProcessor:
             current_items.append(new_item)
             self.logger.info(f"Added new item to request")
 
+        # Check if request status should be auto-updated to in_progress
+        current_status = current_request.get("status", "")
+        new_status = None
+        if should_request_be_in_progress(current_status, items_changed=True):
+            new_status = RequestStatus.IN_PROGRESS
+            self.logger.info(
+                f"Request status will be changed to 'in_progress' because items are being actively modified"
+            )
+
         # Update request with new items array
         variables = {
             "requestUuid": arguments["request_uuid"],
             "items": current_items,
             "updatedBy": "MCP",
         }
+
+        # Add status if it should be changed to in_progress
+        if new_status:
+            variables["status"] = new_status
 
         result = self._execute_graphql_query(
             "ai_rfq_graphql",
@@ -353,12 +470,25 @@ class MCPRfqProcessor:
                 details={"required_fields": ["item_uuid", "item_name"]},
             )
 
+        # Check if request status should be auto-updated to in_progress
+        current_status = current_request.get("status", "")
+        new_status = None
+        if should_request_be_in_progress(current_status, items_changed=True):
+            new_status = RequestStatus.IN_PROGRESS
+            self.logger.info(
+                f"Request status will be changed to 'in_progress' because items are being actively modified"
+            )
+
         # Update request with modified items array
         variables = {
             "requestUuid": arguments["request_uuid"],
             "items": current_items,
             "updatedBy": "MCP",
         }
+
+        # Add status if it should be changed to in_progress
+        if new_status:
+            variables["status"] = new_status
 
         result = self._execute_graphql_query(
             "ai_rfq_graphql",
@@ -835,19 +965,29 @@ class MCPRfqProcessor:
         For each request item with provider_items assigned, a corresponding quote item is created.
 
         Note:
+        - Default status: 'initial' - Quote has been created but not yet being worked on
         - 'rounds' (negotiation rounds) is auto-calculated by backend based on existing quotes from the same provider
         - shipping_method and shipping_amount cannot be set during creation, use update_quote instead
         - Quote items are automatically created from request items with provider_items
         - After creation, quote items can be managed using update_quote_item
+        - Request must be in 'confirmed' status to create quotes
         """
         self.logger.info(f"Creating quote: {arguments}")
+
+        # Validate request status allows quote creation
+        request = self.get_rfq_request(request_uuid=arguments["request_uuid"])
+        if error := propagate_error_if_present(request):
+            return error
+
+        request_status = request.get("status", "")
+        RequestOperationGuard.validate_can_create_quote(request_status)
 
         # First, create the quote
         variables = {
             "requestUuid": arguments["request_uuid"],
             "providerCorpExternalId": arguments["provider_corp_external_id"],
             "salesRepEmail": arguments.get("sales_rep_email"),
-            "status": arguments.get("status", "draft"),
+            "status": arguments.get("status", QuoteStatus.INITIAL),
             "notes": arguments.get("notes", ""),
             "updatedBy": "MCP",
         }
@@ -869,13 +1009,7 @@ class MCPRfqProcessor:
 
         quote = humps.decamelize(result["insertUpdateQuote"]["quote"])
 
-        # Now fetch the request to get items with provider_items
-        request = self.get_rfq_request(request_uuid=arguments["request_uuid"])
-
-        # Check for error in response and propagate if present
-        if error := propagate_error_if_present(request):
-            return error
-
+        # We already have the request from validation above
         # Create quote items from request items that have provider_items assigned
         request_items = request.get("items", [])
         provider_corp_external_id = arguments["provider_corp_external_id"]
@@ -956,8 +1090,27 @@ class MCPRfqProcessor:
 
         Note: 'rounds' (negotiation rounds) are auto-calculated by the backend based on existing quotes from the same provider.
         Cannot modify quote items - use update_quote_item, add_quote_item, or remove_quote_item instead
+
+        Status transitions are validated according to the quote status flow.
         """
         self.logger.info(f"Updating quote: {arguments}")
+
+        # Validate status transition if status is being updated
+        if "status" in arguments:
+            new_status = arguments["status"]
+
+            # Get current quote to check current status
+            current_quote = self.get_quote(
+                request_uuid=arguments["request_uuid"],
+                quote_uuid=arguments["quote_uuid"],
+            )
+            if error := propagate_error_if_present(current_quote):
+                return error
+
+            current_status = current_quote.get("status", "")
+
+            # Validate the transition
+            QuoteStatusTransitions.validate_transition(current_status, new_status)
 
         variables = {
             "requestUuid": arguments["request_uuid"],
@@ -1004,16 +1157,29 @@ class MCPRfqProcessor:
         """
         self.logger.info(f"Updating quote item: {arguments}")
 
+        # Get current quote to check status
+        get_quote_args = {"quote_uuid": arguments["quote_uuid"]}
+        if "request_uuid" in arguments:
+            get_quote_args["request_uuid"] = arguments["request_uuid"]
+
+        current_quote = self.get_quote(**get_quote_args)
+        if error := propagate_error_if_present(current_quote):
+            return error
+
+        # Validate that quote status allows item modifications
+        current_status = current_quote.get("status", "")
+        QuoteOperationGuard.validate_can_modify_items(current_status)
+
         variables = {
             "quoteUuid": arguments["quote_uuid"],
             "quoteItemUuid": arguments.get("quote_item_uuid"),
-            "providerItemUuid": arguments.get("provider_item_uuid"),
-            "itemUuid": arguments.get("item_uuid"),
-            "segmentUuid": arguments.get("segment_uuid"),
-            "batchNo": arguments.get("batch_no"),
-            "requestUuid": arguments.get("request_uuid"),
-            "requestData": arguments.get("request_data"),
-            "qty": arguments.get("qty"),
+            # "providerItemUuid": arguments.get("provider_item_uuid"),
+            # "itemUuid": arguments.get("item_uuid"),
+            # "segmentUuid": arguments.get("segment_uuid"),
+            # "batchNo": arguments.get("batch_no"),
+            # "requestUuid": arguments.get("request_uuid"),
+            # "requestData": arguments.get("request_data"),
+            # "qty": arguments.get("qty"),
             "subtotalDiscount": arguments.get("discount_amount", 0.0),
             "updatedBy": "MCP",
         }
@@ -1060,6 +1226,19 @@ class MCPRfqProcessor:
         """
         self.logger.info(f"Adding quote item: {arguments}")
 
+        # Get current quote to check status
+        get_quote_args = {"quote_uuid": arguments["quote_uuid"]}
+        if "request_uuid" in arguments:
+            get_quote_args["request_uuid"] = arguments["request_uuid"]
+
+        current_quote = self.get_quote(**get_quote_args)
+        if error := propagate_error_if_present(current_quote):
+            return error
+
+        # Validate that quote status allows item modifications
+        current_status = current_quote.get("status", "")
+        QuoteOperationGuard.validate_can_modify_items(current_status)
+
         variables = {
             "quoteUuid": arguments["quote_uuid"],
             "providerItemUuid": arguments["provider_item_uuid"],
@@ -1093,46 +1272,6 @@ class MCPRfqProcessor:
             f"Successfully added quote item to quote {arguments['quote_uuid']}"
         )
         return quote_item
-
-    # * Private helper method (not exposed as MCP tool)
-    @handle_errors(operation_name="remove quote item")
-    def _remove_quote_item(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Remove a quote item from an existing quote.
-        Maps to GraphQL: deleteQuoteItem mutation
-
-        Args:
-            quote_uuid: UUID of the quote
-            quote_item_uuid: UUID of the quote item to remove
-
-        Returns:
-            Success message with deleted quote item UUID
-        """
-        self.logger.info(f"Removing quote item: {arguments}")
-
-        variables = {
-            "quoteUuid": arguments["quote_uuid"],
-            "quoteItemUuid": arguments["quote_item_uuid"],
-            "updatedBy": "MCP",
-        }
-
-        result = self._execute_graphql_query(
-            "ai_rfq_graphql",
-            "deleteQuoteItem",
-            "Mutation",
-            variables,
-        )
-
-        # Check for error in response and propagate if present
-        if error := propagate_error_if_present(result):
-            return error
-
-        response = humps.decamelize(result.get("deleteQuoteItem", {}))
-
-        self.logger.info(
-            f"Successfully removed quote item {arguments['quote_item_uuid']} from quote {arguments['quote_uuid']}"
-        )
-        return response
 
     # * MCP Function.
     @handle_errors(operation_name="get quote")
@@ -1208,8 +1347,8 @@ class MCPRfqProcessor:
         Maps to GraphQL: itemPriceTierList query
 
         Supports quantity-based filtering to find applicable price tiers:
-        - Use max_quantity_greater_then and min_quantity_less_then to find tiers for a specific quantity
-        - Example: For qty=100, use max_quantity_greater_then=100, min_quantity_less_then=100
+        - Use quantity_value to find the matching tier for a specific quantity
+        - Example: For qty=100, use quantity_value=100
           to find tiers where quantity_greater_then <= 100 < quantity_less_then
         """
         variables = {
@@ -1218,10 +1357,7 @@ class MCPRfqProcessor:
             "itemUuid": arguments.get("item_uuid"),
             "providerItemUuid": arguments.get("provider_item_uuid"),
             "segmentUuid": arguments.get("segment_uuid"),
-            "minQuantityGreaterThen": arguments.get("min_quantity_greater_then"),
-            "maxQuantityGreaterThen": arguments.get("max_quantity_greater_then"),
-            "minQuantityLessThen": arguments.get("min_quantity_less_then"),
-            "maxQuantityLessThen": arguments.get("max_quantity_less_then"),
+            "quantityValue": arguments.get("quantity_value"),
             "minPrice": arguments.get("min_price"),
             "maxPrice": arguments.get("max_price"),
             "status": "active",
@@ -1246,26 +1382,44 @@ class MCPRfqProcessor:
     @handle_errors(operation_name="get discount rules")
     def get_discount_rules(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Get discount rules.
+        Get discount rules for item-level pricing.
         Maps to GraphQL: discountRuleList query
 
-        Returns discount rules with filtering options for subtotal thresholds and discount percentages.
+        Required parameters:
+        - item_uuid: Item UUID (required for item-specific discount rules)
+        - provider_item_uuid: Provider item UUID (required for provider-specific pricing)
+        - segment_uuid: Customer segment UUID (required for segment-specific pricing)
 
-        Supports subtotal-based filtering to find applicable discount rules:
-        - Use max_subtotal_greater_than and min_subtotal_less_than to find rules for a specific subtotal
-        - Example: For subtotal=5000, use max_subtotal_greater_than=5000, min_subtotal_less_than=5000
-          to find rules where subtotal_greater_than <= 5000 < subtotal_less_than
+        Optional parameters:
+        - subtotal_value: Find rules applicable to a specific subtotal amount
+          (finds rules where subtotal_greater_than <= value < subtotal_less_than)
+        - max_discount_percentage: Filter by maximum discount percentage threshold
+        - min_discount_percentage: Filter by minimum discount percentage threshold
+
+        Returns only 'active' discount rules.
         """
+        # Validate required parameters
+        validate_not_empty(
+            arguments.get("item_uuid"), "item_uuid", "Item UUID is required"
+        )
+        validate_not_empty(
+            arguments.get("provider_item_uuid"),
+            "provider_item_uuid",
+            "Provider item UUID is required",
+        )
+        validate_not_empty(
+            arguments.get("segment_uuid"),
+            "segment_uuid",
+            "Segment UUID is required",
+        )
+
         variables = {
             "pageNumber": arguments.get("page_number", 1),
             "limit": arguments.get("limit", 50),
-            "itemUuid": arguments.get("item_uuid"),
-            "providerItemUuid": arguments.get("provider_item_uuid"),
-            "segmentUuid": arguments.get("segment_uuid"),
-            "maxSubtotalGreaterThan": arguments.get("max_subtotal_greater_than"),
-            "minSubtotalGreaterThan": arguments.get("min_subtotal_greater_than"),
-            "maxSubtotalLessThan": arguments.get("max_subtotal_less_than"),
-            "minSubtotalLessThan": arguments.get("min_subtotal_less_than"),
+            "itemUuid": arguments["item_uuid"],
+            "providerItemUuid": arguments["provider_item_uuid"],
+            "segmentUuid": arguments["segment_uuid"],
+            "subtotalValue": arguments.get("subtotal_value"),
             "maxDiscountPercentage": arguments.get("max_discount_percentage"),
             "minDiscountPercentage": arguments.get("min_discount_percentage"),
             "status": "active",
@@ -1294,8 +1448,8 @@ class MCPRfqProcessor:
 
         Reads from request items with provider_items arrays and provides:
         - Group-level subtotals (sum of item subtotals)
-        - Item-level details with guardrail pricing, batch info, and price tiers
-        - Applicable discount rules for LLM to discuss with end user
+        - Item-level details with guardrail pricing, batch info, price tiers, and discount rules
+        - Each item has its own applicable discount rules based on item subtotal
 
         Returns pricing structure with discount options for decision-making.
         Does NOT apply discounts - only provides information.
@@ -1305,7 +1459,7 @@ class MCPRfqProcessor:
             segment_uuid: Customer segment UUID for pricing rules
 
         Returns:
-            Grouped pricing structure with subtotals, price tiers, and discount rules
+            Grouped pricing structure with subtotals, and per-item price tiers and discount rules
         """
         self.logger.info(f"Calculating quote pricing info: {arguments}")
 
@@ -1338,20 +1492,21 @@ class MCPRfqProcessor:
         for group_key, group_data in grouped_items.items():
             provider_id, seg_uuid = group_key
 
-            # Prepare item details with guardrail, batch info, and price tiers
+            # Prepare item details with guardrail, batch info, price tiers, and discount rules
             items_info = []
             for item in group_data["items"]:
                 item_qty = item.get("qty", 0)
                 item_uuid = item.get("item_uuid")
                 provider_item_uuid = item.get("provider_item_uuid")
+                item_subtotal = item.get("subtotal", 0)
 
                 # Get price tiers applicable to this item's quantity
-                # Get tiers where quantity_greater_then <= item_qty
+                # Find tiers where quantity_greater_then <= item_qty < quantity_less_then
                 price_tiers_result = self.get_item_price_tiers(
                     item_uuid=item_uuid,
                     provider_item_uuid=provider_item_uuid,
                     segment_uuid=seg_uuid,
-                    max_quantity_greater_then=item_qty,  # Tiers where qty_greater_then <= item_qty
+                    quantity_value=item_qty,
                     limit=50,
                 )
 
@@ -1382,6 +1537,28 @@ class MCPRfqProcessor:
                         # Keep provider_item and provider_item_batches fields
                         price_tiers.append(tier)
 
+                # Get applicable discount rules for this item's subtotal
+                # Find rules where subtotal_greater_than <= item_subtotal < subtotal_less_than
+                # Filter by item_uuid, provider_item_uuid, segment_uuid, and subtotal_value
+                discount_rules_result = self.get_discount_rules(
+                    item_uuid=item_uuid,
+                    provider_item_uuid=provider_item_uuid,
+                    segment_uuid=seg_uuid,
+                    subtotal_value=item_subtotal,
+                    limit=50,
+                )
+
+                discount_rules = []
+                if not propagate_error_if_present(discount_rules_result):
+                    raw_discount_rules = discount_rules_result.get(
+                        "discount_rule_list", []
+                    )
+                    # Remove provider_item field from each discount rule
+                    discount_rules = [
+                        {k: v for k, v in rule.items() if k != "provider_item"}
+                        for rule in raw_discount_rules
+                    ]
+
                 item_data = {
                     "provider_item_uuid": provider_item_uuid,
                     "item_uuid": item_uuid,
@@ -1389,36 +1566,21 @@ class MCPRfqProcessor:
                     "qty": item_qty,
                     "price_per_uom": item.get("price_per_uom"),
                     "guardrail_price_per_uom": item.get("guardrail_price_per_uom"),
-                    "subtotal": item.get("subtotal"),
+                    "subtotal": item_subtotal,
                     "slow_move_item": item.get("slow_move_item", False),
                     "expired_at": item.get("expired_at"),
                     "price_tiers": price_tiers,
+                    "discount_rules": discount_rules,
                 }
                 items_info.append(item_data)
 
-            # Get applicable discount rules for this group's subtotal
+            # Calculate group subtotal
             group_subtotal = group_data["group_subtotal"]
-            discount_rules_result = self.get_discount_rules(
-                segment_uuid=seg_uuid,
-                max_subtotal_greater_than=group_subtotal,
-                min_subtotal_less_than=group_subtotal,
-                limit=50,
-            )
-
-            discount_rules = []
-            if not propagate_error_if_present(discount_rules_result):
-                raw_discount_rules = discount_rules_result.get("discount_rule_list", [])
-                # Remove provider_item field from each discount rule
-                discount_rules = [
-                    {k: v for k, v in rule.items() if k != "provider_item"}
-                    for rule in raw_discount_rules
-                ]
 
             group_info = {
                 "provider_corp_external_id": provider_id,
                 "subtotal": group_subtotal,
                 "items": items_info,
-                "discount_rules": discount_rules,
             }
 
             pricing_groups.append(group_info)
@@ -1568,7 +1730,7 @@ class MCPRfqProcessor:
                         item_uuid=item_uuid,
                         provider_item_uuid=provider_item_uuid,
                         segment_uuid=segment_uuid,
-                        max_quantity_greater_then=qty,
+                        quantity_value=qty,
                         limit=1,
                     )
 
@@ -1657,6 +1819,10 @@ class MCPRfqProcessor:
 
         if error := propagate_error_if_present(quote_result):
             return error
+
+        # Validate that quote status allows installment creation
+        current_status = quote_result.get("status", "")
+        QuoteOperationGuard.validate_can_create_installment(current_status)
 
         # Get the quote amount
         final_total_quote_amount = quote_result.get("final_total_quote_amount")
@@ -1782,8 +1948,39 @@ class MCPRfqProcessor:
         - Mark installment as paid when payment is received
         - Mark installment as cancelled if needed
         - Link installment to sales order number
+
+        Status transitions are validated according to the installment status flow.
+        When all installments are marked as 'paid', the quote is auto-completed.
         """
         self.logger.info(f"Updating installment: {arguments}")
+
+        # Validate status transition if status is being updated
+        if "status" in arguments:
+            new_status = arguments["status"]
+
+            # Get all installments for this quote to find the current one
+            installments_result = self.get_installments(
+                quote_uuid=arguments["quote_uuid"],
+                limit=100,
+            )
+
+            if error := propagate_error_if_present(installments_result):
+                return error
+
+            all_installments = installments_result.get("installment_list", [])
+            current_installment = None
+
+            for inst in all_installments:
+                if inst.get("installment_uuid") == arguments["installment_uuid"]:
+                    current_installment = inst
+                    break
+
+            if current_installment:
+                current_status = current_installment.get("status", "")
+                # Validate the transition
+                InstallmentStatusTransitions.validate_transition(
+                    current_status, new_status
+                )
 
         # Build variables - only include fields that are provided
         variables = {
@@ -1814,6 +2011,51 @@ class MCPRfqProcessor:
             return error
 
         installment = humps.decamelize(result["insertUpdateInstallment"]["installment"])
+
+        # Business Rule: Auto-complete quote if all installments are paid
+        # Check if status was updated to 'paid' and if we should check for quote completion
+        updated_status = installment.get("status", "")
+        if updated_status == InstallmentStatus.PAID:
+            self.logger.info(
+                f"Installment {arguments['installment_uuid']} marked as paid, "
+                f"checking if quote should be completed"
+            )
+
+            # Get all installments for this quote
+            installments_result = self.get_installments(
+                quote_uuid=arguments["quote_uuid"],
+                limit=100,
+            )
+
+            if not propagate_error_if_present(installments_result):
+                all_installments = installments_result.get("installment_list", [])
+
+                # Check if all installments are paid
+                if should_quote_be_completed(all_installments):
+                    self.logger.info(
+                        f"All installments paid for quote {arguments['quote_uuid']}, "
+                        f"auto-completing quote"
+                    )
+
+                    # Get the request_uuid from the installment
+                    request_uuid = installment.get("request_uuid")
+
+                    # Update quote status to completed
+                    update_quote_result = self.update_quote(
+                        request_uuid=request_uuid,
+                        quote_uuid=arguments["quote_uuid"],
+                        status=QuoteStatus.COMPLETED,
+                        notes="Auto-completed: All installments paid",
+                    )
+
+                    if error := propagate_error_if_present(update_quote_result):
+                        self.logger.error(
+                            f"Failed to auto-complete quote {arguments['quote_uuid']}: {error}"
+                        )
+                    else:
+                        self.logger.info(
+                            f"Successfully auto-completed quote {arguments['quote_uuid']}"
+                        )
 
         return installment
 

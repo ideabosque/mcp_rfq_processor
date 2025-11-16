@@ -60,8 +60,9 @@ sys.path.insert(0, os.path.join(base_dir, "silvaengine_dynamodb_base"))
 sys.path.insert(0, os.path.join(base_dir, "mcp_rfq_processor"))
 sys.path.insert(0, os.path.join(base_dir, "ai_rfq_engine"))
 
-from mcp_rfq_processor.mcp_rfq_processor import MCPRfqProcessor
 from silvaengine_utility import Utility
+
+from mcp_rfq_processor.mcp_rfq_processor import MCPRfqProcessor
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -288,6 +289,7 @@ REQUEST_GET_TEST_DATA = _TEST_DATA.get("request_get_test_data", [])
 REQUEST_LIST_TEST_DATA = _TEST_DATA.get("request_list_test_data", [])
 QUOTE_TEST_DATA = _TEST_DATA.get("quote_test_data", [])
 QUOTE_GET_TEST_DATA = _TEST_DATA.get("quote_get_test_data", [])
+CALCULATE_QUOTE_PRICING_TEST_DATA = _TEST_DATA.get("calculate_quote_pricing_test_data", [])
 QUOTE_LIST_TEST_DATA = _TEST_DATA.get("quote_list_test_data", [])
 QUOTE_ITEM_TEST_DATA = _TEST_DATA.get("quote_item_test_data", [])
 INSTALLMENT_TEST_DATA = _TEST_DATA.get("installment_test_data", [])
@@ -512,24 +514,35 @@ def test_get_item_price_tiers(mcp_rfq_processor, test_data):
 @pytest.mark.parametrize("test_data", DISCOUNT_RULE_LIST_TEST_DATA)
 @log_test_result
 def test_get_discount_rules(mcp_rfq_processor, test_data):
-    """Test getting discount rules with various filter combinations including subtotal and discount percentage filters."""
+    """
+    Test getting discount rules with required and optional parameters.
+
+    Required parameters:
+    - itemUuid: Item UUID (required for item-specific discount rules)
+    - providerItemUuid: Provider item UUID (required for provider-specific pricing)
+    - segmentUuid: Customer segment UUID (required for segment-specific pricing)
+
+    Optional parameters:
+    - subtotalValue: Find rules applicable to a specific subtotal amount
+    - maxDiscountPercentage: Filter by maximum discount percentage threshold
+    - minDiscountPercentage: Filter by minimum discount percentage threshold
+
+    The function returns only 'active' discount rules.
+    """
     # Build arguments from test data
     arguments = {
         "page_number": test_data.get("pageNumber", 1),
         "limit": test_data.get("limit", 50),
     }
 
-    # Add optional filters (including new subtotal and discount percentage filters)
+    # Add optional filters - ONLY supported parameters by get_discount_rules
     optional_fields = [
-        "itemUuid",
-        "providerItemUuid",
-        "segmentUuid",
-        "maxSubtotalGreaterThan",
-        "minSubtotalGreaterThan",
-        "maxSubtotalLessThan",
-        "minSubtotalLessThan",
-        "maxDiscountPercentage",
-        "minDiscountPercentage",
+        "itemUuid",           # Filter by item
+        "providerItemUuid",   # Filter by provider item
+        "segmentUuid",        # Filter by customer segment
+        "subtotalValue",      # Find rules where subtotal_greater_than <= value < subtotal_less_than
+        "maxDiscountPercentage",  # Filter by max discount percentage
+        "minDiscountPercentage",  # Filter by min discount percentage
     ]
 
     for field in optional_fields:
@@ -561,14 +574,51 @@ def test_get_discount_rules(mcp_rfq_processor, test_data):
             rule = discount_rules[0]
             assert "discount_rule_uuid" in rule or "discountRuleUuid" in rule
 
-            # Verify discount rule specific fields
-            if "subtotal_greater_than" in rule or "subtotalGreaterThan" in rule:
-                logger.info(f"Discount rule has subtotal_greater_than threshold")
-            if "max_discount_percentage" in rule or "maxDiscountPercentage" in rule:
-                logger.info(f"Discount rule has max_discount_percentage limit")
+            # Verify all returned rules have 'active' status (hardcoded in get_discount_rules)
+            assert rule.get("status") == "active", "All discount rules should have 'active' status"
+
+            # Verify discount rule specific fields and log details
+            subtotal_gt = rule.get("subtotal_greater_than") or rule.get("subtotalGreaterThan")
+            subtotal_lt = rule.get("subtotal_less_than") or rule.get("subtotalLessThan")
+            max_discount = rule.get("max_discount_percentage") or rule.get("maxDiscountPercentage")
 
             logger.info(
-                f"Found {len(discount_rules)} discount rule(s) with filters: {arguments}"
+                f"Discount rule: subtotal range [{subtotal_gt}, {subtotal_lt}), "
+                f"max_discount={max_discount}%"
+            )
+
+            # If subtotal_value was used as a filter, verify the rule applies
+            if "subtotal_value" in arguments:
+                subtotal_val = arguments["subtotal_value"]
+                logger.info(
+                    f"Filtered with subtotal_value={subtotal_val}, "
+                    f"found {len(discount_rules)} matching rule(s)"
+                )
+                # Verify that the rule applies to the subtotal_value
+                if subtotal_gt is not None and subtotal_lt is not None:
+                    # Rule should satisfy: subtotal_greater_than <= subtotal_value < subtotal_less_than
+                    assert subtotal_gt <= subtotal_val < subtotal_lt, (
+                        f"Discount rule range [{subtotal_gt}, {subtotal_lt}) should contain "
+                        f"subtotal_value {subtotal_val}"
+                    )
+
+            # If discount percentage filters were used, verify them
+            if "max_discount_percentage" in arguments:
+                filter_max = arguments["max_discount_percentage"]
+                if max_discount is not None:
+                    assert max_discount <= filter_max, (
+                        f"Rule max_discount_percentage {max_discount} should be <= filter {filter_max}"
+                    )
+
+            if "min_discount_percentage" in arguments:
+                filter_min = arguments["min_discount_percentage"]
+                if max_discount is not None:
+                    assert max_discount >= filter_min, (
+                        f"Rule max_discount_percentage {max_discount} should be >= filter {filter_min}"
+                    )
+
+            logger.info(
+                f"Found {len(discount_rules)} active discount rule(s) with filters: {arguments}"
             )
 
 
@@ -1258,10 +1308,10 @@ def test_update_quote_item(mcp_rfq_processor, test_data):
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("test_data", QUOTE_GET_TEST_DATA)
+@pytest.mark.parametrize("test_data", CALCULATE_QUOTE_PRICING_TEST_DATA)
 @log_test_result
 def test_calculate_quote_pricing(mcp_rfq_processor, test_data):
-    """Test calculating quote pricing."""
+    """Test calculating quote pricing with item-level discount rules."""
     result, error = _call_method(
         mcp_rfq_processor,
         "calculate_quote_pricing",
@@ -1275,6 +1325,53 @@ def test_calculate_quote_pricing(mcp_rfq_processor, test_data):
     assert error is None
     assert result is not None
     assert "request_uuid" in result
+    assert "segment_uuid" in result
+    assert "groups" in result
+    assert "subtotal" in result
+
+    # Verify response structure
+    groups = result.get("groups", [])
+    if groups:
+        for group in groups:
+            # Verify group structure
+            assert "provider_corp_external_id" in group
+            assert "subtotal" in group
+            assert "items" in group
+
+            # Verify discount_rules are NOT at group level (they should be at item level)
+            assert "discount_rules" not in group, "discount_rules should not be at group level"
+
+            items = group.get("items", [])
+            if items:
+                for item in items:
+                    # Verify item structure
+                    assert "provider_item_uuid" in item
+                    assert "item_uuid" in item
+                    assert "qty" in item
+                    assert "price_per_uom" in item
+                    assert "guardrail_price_per_uom" in item
+                    assert "subtotal" in item
+
+                    # Verify price_tiers at item level
+                    assert "price_tiers" in item
+
+                    # Verify discount_rules at item level
+                    assert "discount_rules" in item, "discount_rules should be at item level"
+
+                    discount_rules = item.get("discount_rules", [])
+                    logger.info(
+                        f"Item {item.get('item_uuid')} has {len(discount_rules)} discount rule(s) "
+                        f"for subtotal {item.get('subtotal')}"
+                    )
+
+                    # If discount rules exist, verify their structure
+                    if discount_rules:
+                        for rule in discount_rules:
+                            assert "discount_rule_uuid" in rule or "discountRuleUuid" in rule
+                            # Verify provider_item field was removed
+                            assert "provider_item" not in rule, "provider_item should be removed from discount rules"
+
+        logger.info(f"Found {len(groups)} pricing group(s) with item-level discount rules")
 
 
 @pytest.mark.integration
@@ -1301,28 +1398,6 @@ def test_add_quote_item(mcp_rfq_processor, test_data):
     assert error is None
     assert result is not None
     assert "quote_item_uuid" in result or "quoteItemUuid" in result
-
-
-@pytest.mark.integration
-@pytest.mark.parametrize("test_data", QUOTE_ITEM_TEST_DATA)
-@log_test_result
-def test_remove_quote_item(mcp_rfq_processor, test_data):
-    """Test removing quote item."""
-    result, error = _call_method(
-        mcp_rfq_processor,
-        "remove_quote_item",
-        {
-            "quote_uuid": test_data.get("quoteUuid"),
-            "quote_item_uuid": test_data.get("quoteItemUuid"),
-        },
-        "remove_quote_item",
-    )
-
-    # Note: This may fail if the quote item doesn't exist or has already been deleted
-    # The test is checking that the function executes without exceptions
-    if error is None:
-        assert result is not None
-
 
 # ============================================================================
 # INSTALLMENT TESTS

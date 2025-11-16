@@ -4,8 +4,8 @@
 
 This document provides a comprehensive reference for the GraphQL API operations used by the MCP RFQ Processor, including all queries, mutations, and type definitions from the `ai_rfq_engine` GraphQL backend.
 
-**Version**: 0.1.1  
-**Total MCP Tools**: 27 (all implemented)  
+**Version**: 1.1.0
+**Total MCP Tools**: 25 (all implemented)
 **GraphQL Endpoint**: ai_rfq_graphql (AWS Lambda)
 
 ## Table of Contents
@@ -226,15 +226,14 @@ Get active tiered pricing for items based on item, provider, and customer segmen
   itemUuid: String
   providerItemUuid: String
   segmentUuid: String
-  minQuantityGreaterThen: Int  # Filter: tier.min_quantity > value
-  maxQuantityGreaterThen: Int  # Filter: tier.max_quantity > value
-  minQuantityLessThen: Int     # Filter: tier.min_quantity < value
-  maxQuantityLessThen: Int     # Filter: tier.max_quantity < value
-  minPrice: Float              # Filter: tier.price >= value
-  maxPrice: Float              # Filter: tier.price <= value
-  status: String               # Fixed to "active"
+  quantityValue: Int  # Find tier where quantityGreaterThen <= value < quantityLessThen
+  minPrice: Float     # Filter: tier.price >= value
+  maxPrice: Float     # Filter: tier.price <= value
+  status: String      # Fixed to "active"
 }
 ```
+
+**Updated in v1.1.0**: Simplified to use `quantityValue` parameter instead of min/max quantity filters.
 
 **Returns:** `ItemPriceTierListType`
 
@@ -256,27 +255,26 @@ Get active tiered pricing for items based on item, provider, and customer segmen
 - `total`: Total number of active price tiers
 
 #### `discountRuleList`
-Get discount rules with filtering options for subtotal thresholds and discount percentages.
+Get discount rules for item-level pricing with filtering options for subtotal and discount percentages.
 
-**Note:** Typically used via `calculate_quote_pricing` which automatically filters rules by group subtotal. Direct use is available for LLM-driven discount exploration.
+**Note:** Typically used via `calculate_quote_pricing` which automatically filters rules by item subtotal. Direct use is available for LLM-driven discount exploration.
 
 **Variables:**
 ```graphql
 {
   pageNumber: Int
   limit: Int
-  itemUuid: String
-  providerItemUuid: String
-  segmentUuid: String
-  maxSubtotalGreaterThan: Float  # Filter: rule.max_subtotal > value
-  minSubtotalGreaterThan: Float  # Filter: rule.min_subtotal > value
-  maxSubtotalLessThan: Float     # Filter: rule.max_subtotal < value
-  minSubtotalLessThan: Float     # Filter: rule.min_subtotal < value
+  itemUuid: String!              # REQUIRED - Item UUID for item-specific rules
+  providerItemUuid: String!      # REQUIRED - Provider item UUID for provider-specific pricing
+  segmentUuid: String!           # REQUIRED - Segment UUID for segment-specific pricing
+  subtotalValue: Float           # Find rule where subtotalGreaterThan <= value < subtotalLessThan
   maxDiscountPercentage: Float   # Filter: rule.discount <= value
   minDiscountPercentage: Float   # Filter: rule.discount >= value
   status: String                 # Filter by status (e.g., "active", "inreview")
 }
 ```
+
+**Updated in v1.1.0**: Simplified to use `subtotalValue` parameter and made item/provider/segment parameters required. Rules are now item-level (not group-level).
 
 **Returns:** `DiscountRuleListType`
 
@@ -990,13 +988,13 @@ mutation {
 ### Pricing Queries with Filters (New)
 
 ```graphql
-# Get price tiers filtered by quantity
+# Get price tier for specific quantity (v1.1.0)
 query {
   itemPriceTierList(
     itemUuid: "item-123",
     providerItemUuid: "prov-item-123",
     segmentUuid: "seg-uuid",
-    maxQuantityGreaterThen: 500,  # Get tiers where max_qty > 500
+    quantityValue: 500,  # Find tier where quantityGreaterThen <= 500 < quantityLessThen
     status: "active"
   ) {
     itemPriceTierList {
@@ -1008,11 +1006,13 @@ query {
   }
 }
 
-# Get discount rules filtered by subtotal
+# Get discount rules for specific item subtotal (v1.1.0)
 query {
   discountRuleList(
+    itemUuid: "item-123",
+    providerItemUuid: "prov-item-123",
     segmentUuid: "seg-uuid",
-    maxSubtotalGreaterThan: 4750.00,  # Get rules where max_subtotal > 4750
+    subtotalValue: 4750.00,  # Find rule where subtotalGreaterThan <= 4750 < subtotalLessThan
     status: "active"
   ) {
     discountRuleList {

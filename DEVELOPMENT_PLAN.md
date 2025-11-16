@@ -32,8 +32,17 @@ request (in_progress)
     ↓
 request (confirmed)
     • create quote
+    ↓ (if items modified after quote creation)
+request (modified)
+    • all quotes automatically disapproved
+    ↓ (when items are further modified)
+request (in_progress) [auto-transition]
+    • continue editing items
     ↓
-request (completed) or request (modified)
+request (confirmed)
+    • create new quote
+    ↓
+request (completed)
 ```
 
 **Request Status Definitions:**
@@ -42,6 +51,10 @@ request (completed) or request (modified)
 - **confirmed**: Request is finalized and ready for quote creation
 - **completed**: Request has been fulfilled with an approved quote
 - **modified**: Request was changed after quote creation (triggers quote disapproval)
+
+**Automatic Status Transitions:**
+- `modified` → `in_progress`: When items are modified (via add/remove item operations)
+- User must **explicitly** set status to `modified` to trigger quote disapproval
 
 ### Quote Status Flow
 
@@ -1451,6 +1464,153 @@ Scenario: Apply discounts to quote items
 
 ---
 
+## Status Management Implementation
+
+### Overview
+**Status**: ✅ COMPLETED (2025-11-15)
+
+A comprehensive status management system has been implemented to enforce the status flows and business rules defined in this plan.
+
+### Components
+
+#### 1. Status Constants Module (`status_manager.py`)
+**File**: `mcp_rfq_processor/status_manager.py`
+
+Provides:
+- **Status Constants**: `RequestStatus`, `QuoteStatus`, `InstallmentStatus`
+- **Status Transition Rules**: Validation logic for allowed transitions
+- **Operation Guards**: Prevent invalid operations based on current status
+- **Automatic Status Update Logic**: Helper functions for business rules
+
+Status Values:
+```python
+class RequestStatus:
+    INITIAL = "initial"         # Default for new requests
+    IN_PROGRESS = "in_progress"
+    CONFIRMED = "confirmed"
+    COMPLETED = "completed"
+    MODIFIED = "modified"
+
+class QuoteStatus:
+    INITIAL = "initial"         # Default for new quotes
+    IN_PROGRESS = "in_progress"
+    CONFIRMED = "confirmed"
+    COMPLETED = "completed"
+    DISAPPROVED = "disapproved"
+
+class InstallmentStatus:
+    PENDING = "pending"         # Default for new installments
+    PAID = "paid"
+    CANCELLED = "cancelled"
+```
+
+#### 2. Status Transition Validation
+**Implementation**: All update methods validate status transitions
+
+Validates that status changes follow the defined flows:
+- `update_rfq_request`: Validates request status transitions
+- `update_quote`: Validates quote status transitions
+- `update_installment`: Validates installment status transitions
+
+Invalid transitions raise `ValidationError` with clear error messages.
+
+#### 3. Operation Guards
+**Implementation**: Guard validations in critical operations
+
+Guards prevent operations that don't match current status:
+- `create_quote`: Requires request status = `confirmed`
+- Quote item modifications: Allowed only in `initial` or `in_progress` status
+- Installment creation: Allowed only for `confirmed` quotes
+
+#### 4. Automatic Business Rules
+**Implementation**: Auto-triggered status updates
+
+**Rule 1: Auto-Disapprove Quotes on Request Modification**
+- **Trigger**: `update_rfq_request` changes status to `modified`
+- **Action**: All related quotes automatically set to `disapproved`
+- **Implementation**: `_disapprove_all_quotes_for_request()` helper method
+- **Location**: `mcp_rfq_processor.py:65-126`
+
+**Rule 2: Auto-Complete Quote When All Installments Paid**
+- **Trigger**: `update_installment` marks last installment as `paid`
+- **Action**: Quote status automatically set to `completed`
+- **Implementation**: Check in `update_installment()` using `should_quote_be_completed()`
+- **Location**: `mcp_rfq_processor.py:1911-1962`
+
+### Files Modified
+
+1. **New File**: `mcp_rfq_processor/status_manager.py` (398 lines)
+   - Status constants and enums
+   - Transition validation logic
+   - Operation guard logic
+   - Helper functions
+
+2. **Updated**: `mcp_rfq_processor/mcp_rfq_processor.py`
+   - Import status manager components
+   - Add `_disapprove_all_quotes_for_request()` helper (line 65)
+   - Update `submit_rfq_request()` default status to `initial`
+   - Update `create_quote()` default status to `initial`
+   - Add validation guard to `create_quote()`
+   - Add auto-disapproval logic to `update_rfq_request()`
+   - Add status transition validation to `update_rfq_request()`
+   - Add status transition validation to `update_quote()`
+   - Add status transition validation to `update_installment()`
+   - Add auto-complete logic to `update_installment()`
+
+3. **Updated**: `mcp_rfq_processor/__init__.py`
+   - Export status constants and validators
+   - Make status management available to external users
+
+### Benefits
+
+1. **Data Integrity**: Prevents invalid status transitions
+2. **Business Rule Enforcement**: Automatic quote disapproval and completion
+3. **Clear Error Messages**: Validation errors explain allowed transitions
+4. **Audit Trail**: Status changes are logged
+5. **Developer Experience**: Clear constants instead of magic strings
+6. **Extensibility**: Easy to add new statuses or transitions
+
+### Usage Example
+
+```python
+from mcp_rfq_processor import (
+    MCPRfqProcessor,
+    RequestStatus,
+    QuoteStatus,
+    InstallmentStatus,
+)
+
+# Create request with explicit status
+processor.submit_rfq_request(
+    contact_uuid="user@example.com",
+    request_title="Office Supplies",
+    status=RequestStatus.INITIAL,  # Default, can be omitted
+)
+
+# Update request with validation
+processor.update_rfq_request(
+    request_uuid="req-123",
+    status=RequestStatus.CONFIRMED,  # Validates transition
+)
+
+# Create quote (requires confirmed request)
+processor.create_quote(
+    request_uuid="req-123",  # Must be confirmed status
+    provider_corp_external_id="PROV-001",
+    segment_uuid="seg-456",
+    status=QuoteStatus.INITIAL,  # Default
+)
+
+# Mark installment as paid (auto-completes quote if all paid)
+processor.update_installment(
+    quote_uuid="quote-789",
+    installment_uuid="inst-001",
+    status=InstallmentStatus.PAID,  # Triggers auto-completion check
+)
+```
+
+---
+
 ## Questions & Clarifications
 
 - [ ] What is the production endpoint_id for ai_rfq_graphql?
@@ -1469,6 +1629,7 @@ Scenario: Apply discounts to quote items
 | 2025-11-06 | 0.2.0 | Updated based on business requirements:<br>- Added `update_rfq_request` tool<br>- Removed `add_quote_item`, `update_quote_item`, `delete_quote_item` tools<br>- Added `update_quote` tool (replaces `update_quote_status`)<br>- Added `update_quote_item_discount` tool<br>- Documented new workflows for item modification<br>- Total tools: 22 (was 24) | Development Team |
 | 2025-11-10 | 1.0.0 | **PROJECT COMPLETED**:<br>- All 25 MCP tools fully implemented<br>- Kept flexible quote item operations (add/update/remove)<br>- Added convenience methods for request items<br>- Comprehensive test suite (1008 lines)<br>- Complete documentation (README, API Reference, Dev Plan)<br>- Streamlined segment management (read-only)<br>- Total tools: 25 (focused on RFQ workflow) | Development Team |
 | 2025-11-15 | 1.0.1 | **Documentation Updates**:<br>- Corrected version numbers in README.md<br>- Updated feature descriptions to match v0.1.0<br>- Synchronized documentation across all files<br>- Maintained 25 tools implementation status | Development Team |
+| 2025-11-15 | 1.1.0 | **Status Management Implementation**:<br>- Created `status_manager.py` module (398 lines)<br>- Added status constants: RequestStatus, QuoteStatus, InstallmentStatus<br>- Implemented status transition validation<br>- Added operation guards (prevent invalid operations)<br>- Implemented auto-disapprove quotes on request modification<br>- Implemented auto-complete quote when all installments paid<br>- Updated default status values to match development plan<br>- Exported status management in `__init__.py`<br>- Comprehensive status flow enforcement | Development Team |
 
 ---
 
