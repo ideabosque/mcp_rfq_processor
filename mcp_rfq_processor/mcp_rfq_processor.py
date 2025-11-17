@@ -35,6 +35,7 @@ from .status_manager import (
     RequestStatusTransitions,
     should_quote_be_completed,
     should_quotes_be_disapproved,
+    should_request_be_completed,
     should_request_be_in_progress,
 )
 
@@ -741,6 +742,54 @@ class MCPRfqProcessor:
 
         if error := propagate_error_if_present(confirmed_quote):
             return error
+
+        # Business Rule: Disapprove all other quotes for this request when one is confirmed
+        self.logger.info(
+            f"Quote {quote_uuid} confirmed, disapproving all other quotes for request {request_uuid}"
+        )
+
+        # Get all quotes for this request
+        quotes_result = self.search_quotes(
+            request_uuid=request_uuid,
+            limit=100,
+        )
+
+        if not propagate_error_if_present(quotes_result):
+            all_quotes = quotes_result.get("quote_list", [])
+
+            # Filter quotes that should be disapproved
+            # Exclude: the confirmed quote, already in terminal states (disapproved, completed)
+            terminal_statuses = [
+                QuoteStatus.DISAPPROVED,
+                QuoteStatus.COMPLETED,
+            ]
+            quotes_to_disapprove = [
+                q
+                for q in all_quotes
+                if q.get("quote_uuid") != quote_uuid
+                and q.get("status") not in terminal_statuses
+            ]
+
+            # Disapprove each quote
+            for quote_to_disapprove in quotes_to_disapprove:
+                disapprove_quote_uuid = quote_to_disapprove.get("quote_uuid")
+                self.logger.info(f"Disapproving quote {disapprove_quote_uuid}")
+
+                disapprove_result = self.update_quote(
+                    request_uuid=request_uuid,
+                    quote_uuid=disapprove_quote_uuid,
+                    status=QuoteStatus.DISAPPROVED,
+                    notes="Auto-disapproved: Another quote was confirmed",
+                )
+
+                if error := propagate_error_if_present(disapprove_result):
+                    self.logger.error(
+                        f"Failed to disapprove quote {disapprove_quote_uuid}: {error}"
+                    )
+                else:
+                    self.logger.info(
+                        f"Successfully disapproved quote {disapprove_quote_uuid}"
+                    )
 
         # Step 2: Create installments
         installments_result = None
@@ -1457,33 +1506,43 @@ class MCPRfqProcessor:
         Maps to GraphQL: insertUpdateQuote mutation
 
         Can update:
-        - shipping_method, shipping_amount
-        - status
+        - shipping_method, shipping_amount (only in 'initial' or 'in_progress' status)
+        - status (validated according to status flow)
         - notes
 
         Note: 'rounds' (negotiation rounds) are auto-calculated by the backend based on existing quotes from the same provider.
         Cannot modify quote items - use update_quote_item, add_quote_item, or remove_quote_item instead
 
         Status transitions are validated according to the quote status flow.
+        Shipping/notes updates require quote to be in 'initial' or 'in_progress' status.
         """
         self.logger.info(f"Updating quote: {arguments}")
+
+        # Get current quote to check current status
+        current_quote = self.get_quote(
+            request_uuid=arguments["request_uuid"],
+            quote_uuid=arguments["quote_uuid"],
+        )
+        if error := propagate_error_if_present(current_quote):
+            return error
+
+        current_status = current_quote.get("status", "")
 
         # Validate status transition if status is being updated
         if "status" in arguments:
             new_status = arguments["status"]
-
-            # Get current quote to check current status
-            current_quote = self.get_quote(
-                request_uuid=arguments["request_uuid"],
-                quote_uuid=arguments["quote_uuid"],
-            )
-            if error := propagate_error_if_present(current_quote):
-                return error
-
-            current_status = current_quote.get("status", "")
-
             # Validate the transition
             QuoteStatusTransitions.validate_transition(current_status, new_status)
+
+        # Validate that quote status allows metadata modifications (shipping, notes)
+        # Only apply this validation if we're NOT doing a status change
+        # (Status changes can include notes to document the reason for the change)
+        is_updating_metadata = any(
+            key in arguments
+            for key in ["shipping_method", "shipping_amount", "notes"]
+        )
+        if is_updating_metadata and "status" not in arguments:
+            QuoteOperationGuard.validate_can_modify_items(current_status)
 
         variables = {
             "requestUuid": arguments["request_uuid"],
@@ -2421,8 +2480,10 @@ class MCPRfqProcessor:
                         f"auto-completing quote"
                     )
 
-                    # Get the request_uuid from the installment
-                    request_uuid = installment.get("request_uuid")
+                    # Get the request_uuid from the quote object in the installment
+                    request_uuid = installment.get("quote", {}).get("request", {}).get(
+                        "request_uuid"
+                    )
 
                     # Update quote status to completed
                     update_quote_result = self.update_quote(
@@ -2440,6 +2501,45 @@ class MCPRfqProcessor:
                         self.logger.info(
                             f"Successfully auto-completed quote {arguments['quote_uuid']}"
                         )
+
+                        # Business Rule: Auto-complete request if at least one quote is completed
+                        self.logger.info(
+                            f"Quote {arguments['quote_uuid']} completed, "
+                            f"checking if request should be completed"
+                        )
+
+                        # Get all quotes for this request
+                        quotes_result = self.search_quotes(
+                            request_uuid=request_uuid,
+                            limit=100,
+                        )
+
+                        if not propagate_error_if_present(quotes_result):
+                            all_quotes = quotes_result.get("quote_list", [])
+
+                            # Check if at least one quote is completed
+                            if should_request_be_completed(all_quotes):
+                                self.logger.info(
+                                    f"At least one quote completed for request {request_uuid}, "
+                                    f"auto-completing request"
+                                )
+
+                                # Update request status to completed
+                                update_request_result = self.update_rfq_request(
+                                    request_uuid=request_uuid,
+                                    status=RequestStatus.COMPLETED,
+                                )
+
+                                if error := propagate_error_if_present(
+                                    update_request_result
+                                ):
+                                    self.logger.error(
+                                        f"Failed to auto-complete request {request_uuid}: {error}"
+                                    )
+                                else:
+                                    self.logger.info(
+                                        f"Successfully auto-completed request {request_uuid}"
+                                    )
 
         return installment
 

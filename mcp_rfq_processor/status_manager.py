@@ -487,3 +487,27 @@ def should_quote_be_completed(installments: List[Dict]) -> bool:
     )
 
     return all_paid
+
+
+def should_request_be_completed(quotes: List[Dict]) -> bool:
+    """
+    Determine if request status should be changed to 'completed'.
+
+    Business Rule: When at least one quote is marked as 'completed',
+    the request should be marked as 'completed'.
+
+    Args:
+        quotes: List of quote objects with 'status' field
+
+    Returns:
+        True if request should be marked as completed
+    """
+    if not quotes:
+        return False
+
+    # Check if at least one quote is completed
+    has_completed_quote = any(
+        quote.get("status") == QuoteStatus.COMPLETED for quote in quotes
+    )
+
+    return has_completed_quote

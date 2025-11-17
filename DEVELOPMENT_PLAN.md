@@ -2,7 +2,7 @@
 
 ## Project Status: ✅ COMPLETED
 
-**Last Updated**: 2025-11-15
+**Last Updated**: 2025-11-17 (v1.3.0)
 
 All planned features have been successfully implemented and are production-ready. This document now serves as a historical record of the development process and architectural decisions.
 
@@ -52,8 +52,9 @@ request (completed)
 - **completed**: Request has been fulfilled with an approved quote
 - **modified**: Request was changed after quote creation (triggers quote disapproval)
 
-**Automatic Status Transitions:**
+**Automatic Status Transitions (v1.3.0):**
 - `modified` → `in_progress`: When items are modified (via add/remove item operations)
+- `confirmed` → `completed`: When at least one quote reaches 'completed' status (auto-completion)
 - User must **explicitly** set status to `modified` to trigger quote disapproval
 
 ### Quote Status Flow
@@ -80,7 +81,17 @@ quote (completed) or quote (disapproved)
 - **in_progress**: Quote is being refined; only discount adjustments allowed via `update_quote_item` (no item additions or removals)
 - **confirmed**: Quote has been finalized and is awaiting approval/payment; installments should be created with `pending` status; no item modifications allowed
 - **completed**: Quote has been approved and all payment installments have been marked as `paid`
-- **disapproved**: Quote was rejected or invalidated (e.g., when parent request is modified)
+- **disapproved**: Quote was rejected or invalidated (e.g., when parent request is modified, or when another quote for the same request is confirmed)
+
+**Automatic Status Transitions (v1.3.0):**
+- `initial` → `in_progress`: When first quote item is added (auto-transition)
+- `confirmed` → `completed`: When all installments are marked as 'paid' (auto-completion, adds note "Auto-completed: All installments paid")
+- `initial/in_progress` → `disapproved`: When another quote for the same request is confirmed (auto-disapproval, adds note "Auto-disapproved: Another quote was confirmed")
+  - Only affects competing quotes not already in terminal states (completed, disapproved)
+
+**Validation Rules (v1.3.0):**
+- Metadata updates (shipping_method, shipping_amount, notes) only allowed in 'initial' or 'in_progress' status
+- Exception: Status transitions can include notes to document the reason for change
 
 ### Installment Status Flow
 

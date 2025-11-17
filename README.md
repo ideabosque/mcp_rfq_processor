@@ -13,8 +13,28 @@ The MCP RFQ Processor connects AI assistants to the `ai_rfq_engine` GraphQL back
 - **Document Management**: Upload and track RFQ-related files
 - **Segment Management**: Organize customers and providers into pricing segments
 
-**Current Version**: 1.2.0
+**Current Version**: 1.3.0
 **Total MCP Tools**: 26 (fully implemented and tested)
+
+### What's New in v1.3.0
+
+**Enhanced Auto-Completion and Auto-Disapproval:**
+- **Auto-Complete Quote**: When all installments for a quote are marked as 'paid', the quote automatically transitions to 'completed' status with note "Auto-completed: All installments paid"
+- **Auto-Complete Request**: When at least one quote reaches 'completed' status, the request automatically transitions to 'completed' status
+- **Auto-Disapprove Competing Quotes**: When one quote is confirmed, all other quotes for the same request are automatically disapproved (excluding quotes already in terminal states: completed, disapproved)
+  - Only affects quotes in 'initial' or 'in_progress' status
+  - Adds note "Auto-disapproved: Another quote was confirmed"
+
+**Validation Improvements:**
+- **Quote Update Restrictions**: Metadata updates (shipping_method, shipping_amount, notes) are only allowed when quote is in 'initial' or 'in_progress' status
+  - Exception: Status transitions can include notes to document the reason for the change
+- **Helper Functions**: Added `should_request_be_completed()` and enhanced `should_quote_be_completed()` in status_manager
+
+**Complete Workflow:**
+The system now supports a fully automated workflow:
+1. Create request → Confirm request and create quotes for multiple providers
+2. Confirm one quote → Other quotes automatically disapproved
+3. Pay all installments → Quote automatically completed → Request automatically completed
 
 ### What's New in v1.2.0
 

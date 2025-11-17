@@ -60,8 +60,9 @@ sys.path.insert(0, os.path.join(base_dir, "silvaengine_dynamodb_base"))
 sys.path.insert(0, os.path.join(base_dir, "mcp_rfq_processor"))
 sys.path.insert(0, os.path.join(base_dir, "ai_rfq_engine"))
 
-from mcp_rfq_processor.mcp_rfq_processor import MCPRfqProcessor
 from silvaengine_utility import Utility
+
+from mcp_rfq_processor.mcp_rfq_processor import MCPRfqProcessor
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -300,6 +301,7 @@ QUOTE_ITEM_TEST_DATA = _TEST_DATA.get("quote_item_test_data", [])
 INSTALLMENT_TEST_DATA = _TEST_DATA.get("installment_test_data", [])
 INSTALLMENT_LIST_TEST_DATA = _TEST_DATA.get("installment_list_test_data", [])
 INSTALLMENT_UPDATE_TEST_DATA = _TEST_DATA.get("installment_update_test_data", [])
+INSTALLMENT_PAYMENT_TEST_DATA = _TEST_DATA.get("installment_payment_test_data", [])
 INSTALLMENTS_CREATE_TEST_DATA = _TEST_DATA.get("installments_create_test_data", [])
 CONFIRM_REQUEST_AND_CREATE_QUOTES_TEST_DATA = _TEST_DATA.get(
     "confirm_request_and_create_quotes_test_data", []
@@ -1281,7 +1283,7 @@ def test_get_quote(mcp_rfq_processor, test_data):
 @pytest.mark.parametrize("test_data", QUOTE_TEST_DATA)
 @log_test_result
 def test_update_quote(mcp_rfq_processor, test_data):
-    """Test updating quote."""
+    """Test updating quote with shipping method and amount."""
     result, error = _call_method(
         mcp_rfq_processor,
         "update_quote",
@@ -1290,7 +1292,6 @@ def test_update_quote(mcp_rfq_processor, test_data):
             "quote_uuid": test_data.get("quoteUuid"),
             "shipping_method": test_data.get("shippingMethod"),
             "shipping_amount": test_data.get("shippingAmount"),
-            "status": "submitted",
         },
         "update_quote",
     )
@@ -1298,6 +1299,8 @@ def test_update_quote(mcp_rfq_processor, test_data):
     assert error is None
     assert result is not None
     assert "quote_uuid" in result
+    assert result.get("shipping_method") == test_data.get("shippingMethod")
+    assert result.get("shipping_amount") == test_data.get("shippingAmount")
 
 
 @pytest.mark.integration
@@ -1326,6 +1329,7 @@ def test_update_quote_item(mcp_rfq_processor, test_data):
         mcp_rfq_processor,
         "update_quote_item",
         {
+            "request_uuid": test_data.get("requestUuid"),
             "quote_uuid": test_data.get("quoteUuid"),
             "quote_item_uuid": test_data.get("quoteItemUuid"),
             "discount_amount": test_data.get("subtotalDiscount", 0.0),
@@ -1524,6 +1528,45 @@ def test_update_installment(mcp_rfq_processor, test_data):
     assert error is None
     assert result is not None
     assert "installment_uuid" in result
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", INSTALLMENT_PAYMENT_TEST_DATA)
+@log_test_result
+def test_pay_installment_and_auto_complete(mcp_rfq_processor, test_data):
+    """Test paying installment and auto-completing quote and request."""
+    arguments = {
+        "quote_uuid": test_data.get("quoteUuid"),
+        "installment_uuid": test_data.get("installmentUuid"),
+    }
+
+    # Add optional fields if present
+    if test_data.get("status") is not None:
+        arguments["status"] = test_data.get("status")
+    if test_data.get("salesorderNo") is not None:
+        arguments["salesorder_no"] = test_data.get("salesorderNo")
+    if test_data.get("paymentMethod") is not None:
+        arguments["payment_method"] = test_data.get("paymentMethod")
+
+    result, error = _call_method(
+        mcp_rfq_processor,
+        "update_installment",
+        arguments,
+        "pay_installment",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "installment_uuid" in result
+    assert result.get("status") == "paid"
+
+    # Log the quote and request status for verification
+    quote_status = result.get("quote", {}).get("status")
+    request_status = result.get("quote", {}).get("request", {}).get("status")
+
+    logger.info(f"After paying installment {result.get('installment_uuid')}:")
+    logger.info(f"  Quote status: {quote_status}")
+    logger.info(f"  Request status: {request_status}")
 
 
 @pytest.mark.integration
@@ -1745,6 +1788,211 @@ def test_complete_rfq_workflow(mcp_rfq_processor):
     assert "quote_uuid" in quote_result
     logger.info(f"Workflow Step 2: Quote created - {quote_result['quote_uuid']}")
     logger.info("Complete RFQ workflow executed successfully")
+
+
+@pytest.mark.integration
+@log_test_result
+def test_complete_workflow_with_auto_disapproval(mcp_rfq_processor):
+    """
+    Test complete workflow:
+    1. Create new request
+    2. Confirm request and create quotes for 2 providers
+    3. Confirm one quote (verify others are auto-disapproved)
+    4. Pay all installments (verify auto-completion)
+    """
+    logger.info("="*80)
+    logger.info("COMPLETE WORKFLOW TEST: Auto-Disapproval and Auto-Completion")
+    logger.info("="*80)
+
+    # Step 1: Create new request
+    logger.info("\n[Step 1] Creating new RFQ request...")
+    request_result, request_error = _call_method(
+        mcp_rfq_processor,
+        "submit_rfq_request",
+        {
+            "email": "workflow.test@example.com",
+            "request_title": "Complete Workflow Test - Steel Purchase",
+            "request_description": "Testing auto-disapproval and auto-completion",
+            "billing_address": {
+                "street": "123 Workflow St",
+                "city": "Test City",
+                "state": "Test State",
+                "zip": "12345"
+            },
+            "shipping_address": {
+                "street": "456 Ship Ave",
+                "city": "Test City",
+                "state": "Test State",
+                "zip": "67890"
+            },
+            "items": [
+                {
+                    "item_uuid": "04540718329890843199",
+                    "item_name": "Steel Plate",
+                    "qty": 100,
+                    "provider_items": [
+                        {
+                            "provider_item_uuid": "76109526415051866240",
+                            "provider_corp_external_id": "PROVIDER-001",
+                            "batch_no": "BATCH-001",
+                            "qty": 50
+                        },
+                        {
+                            "provider_item_uuid": "76109526415051866240",
+                            "provider_corp_external_id": "PROVIDER-002",
+                            "batch_no": "BATCH-002",
+                            "qty": 50
+                        }
+                    ]
+                }
+            ]
+        },
+        "workflow_submit_request"
+    )
+
+    assert request_error is None
+    request_uuid = request_result["request_uuid"]
+    logger.info(f"Request created: {request_uuid}, Status: {request_result['status']}")
+
+    # Step 2: Confirm request and create quotes
+    logger.info("\n[Step 2] Confirming request and creating quotes for 2 providers...")
+    confirm_result, confirm_error = _call_method(
+        mcp_rfq_processor,
+        "confirm_request_and_create_quotes",
+        {
+            "request_uuid": request_uuid,
+            "provider_corp_external_ids": ["PROVIDER-001", "PROVIDER-002"],
+            "segment_uuid": "99438521399025614976"
+        },
+        "workflow_confirm_request"
+    )
+
+    assert confirm_error is None
+    assert len(confirm_result["created_quotes"]) == 2
+
+    quote1 = confirm_result["created_quotes"][0]
+    quote2 = confirm_result["created_quotes"][1]
+    quote1_uuid = quote1["quote_uuid"]
+    quote2_uuid = quote2["quote_uuid"]
+
+    logger.info(f"Quote 1: {quote1_uuid} ({quote1['provider_corp_external_id']}) - Status: {quote1['status']}")
+    logger.info(f"Quote 2: {quote2_uuid} ({quote2['provider_corp_external_id']}) - Status: {quote2['status']}")
+
+    # Step 3: Confirm first quote and verify second is auto-disapproved
+    logger.info(f"\n[Step 3] Confirming Quote 1, expecting Quote 2 to be auto-disapproved...")
+    confirm_quote_result, confirm_quote_error = _call_method(
+        mcp_rfq_processor,
+        "confirm_quote_and_create_installments",
+        {
+            "request_uuid": request_uuid,
+            "quote_uuid": quote1_uuid,
+            "create_single_installment": False,
+            "interval_num": 2,
+            "total_pay_period": 6,
+            "payment_method": "credit_card"
+        },
+        "workflow_confirm_quote"
+    )
+
+    assert confirm_quote_error is None
+    assert confirm_quote_result["quote"]["status"] == "confirmed"
+    installments = confirm_quote_result["installments"]
+    logger.info(f"Quote 1 confirmed with {len(installments)} installments")
+
+    # Verify Quote 2 was auto-disapproved
+    logger.info("\n[Step 4] Verifying Quote 2 was auto-disapproved...")
+    quote2_check, quote2_error = _call_method(
+        mcp_rfq_processor,
+        "get_quote",
+        {
+            "request_uuid": request_uuid,
+            "quote_uuid": quote2_uuid
+        },
+        "workflow_check_quote2"
+    )
+
+    assert quote2_error is None
+    logger.info(f"Quote 2 Status: {quote2_check['status']}")
+    logger.info(f"Quote 2 Notes: {quote2_check.get('notes', 'No notes')}")
+
+    if quote2_check['status'] == 'disapproved':
+        logger.info("SUCCESS: Quote 2 was automatically disapproved!")
+    else:
+        logger.error(f"FAILED: Quote 2 status is '{quote2_check['status']}', expected 'disapproved'")
+
+    assert quote2_check['status'] == 'disapproved', "Auto-disapproval failed"
+    assert "Auto-disapproved" in quote2_check.get('notes', ''), "Auto-disapproval note missing"
+
+    # Step 4: Pay all installments and verify auto-completion
+    logger.info(f"\n[Step 5] Paying all {len(installments)} installments to trigger auto-completion...")
+
+    for i, installment in enumerate(installments, 1):
+        installment_uuid = installment["installment_uuid"]
+        amount = installment["installment_amount"]
+
+        logger.info(f"Paying installment {i}/{len(installments)} (${amount})...")
+
+        pay_result, pay_error = _call_method(
+            mcp_rfq_processor,
+            "update_installment",
+            {
+                "quote_uuid": quote1_uuid,
+                "installment_uuid": installment_uuid,
+                "status": "paid",
+                "salesorder_no": f"SO-WORKFLOW-{i:03d}"
+            },
+            "workflow_pay_installment"
+        )
+
+        assert pay_error is None
+        logger.info(f"Installment {i} paid successfully")
+
+        # Check status after last payment
+        if i == len(installments):
+            logger.info(f"\n[Step 6] Verifying auto-completion after final payment...")
+            logger.info("Fetching fresh quote and request data to verify auto-completion...")
+
+            # Fetch fresh quote data (returned installment has cached data)
+            fresh_quote, quote_error = _call_method(
+                mcp_rfq_processor,
+                "get_quote",
+                {
+                    "request_uuid": request_uuid,
+                    "quote_uuid": quote1_uuid
+                },
+                "workflow_verify_quote"
+            )
+
+            assert quote_error is None
+            quote_status = fresh_quote.get("status")
+            request_status = fresh_quote.get("request", {}).get("status")
+
+            logger.info(f"Quote Status: {quote_status}")
+            logger.info(f"Request Status: {request_status}")
+
+            if quote_status == "completed":
+                logger.info("SUCCESS: Quote was automatically completed!")
+            else:
+                logger.error(f"FAILED: Quote status is '{quote_status}', expected 'completed'")
+
+            if request_status == "completed":
+                logger.info("SUCCESS: Request was automatically completed!")
+            else:
+                logger.error(f"FAILED: Request status is '{request_status}', expected 'completed'")
+
+            assert quote_status == "completed", "Quote auto-completion failed"
+            assert request_status == "completed", "Request auto-completion failed"
+
+    logger.info("\n" + "="*80)
+    logger.info("COMPLETE WORKFLOW TEST PASSED!")
+    logger.info("="*80)
+    logger.info(f"Summary:")
+    logger.info(f"  - Request UUID: {request_uuid}")
+    logger.info(f"  - Quote 1 (Confirmed): {quote1_uuid} - Status: completed")
+    logger.info(f"  - Quote 2 (Auto-Disapproved): {quote2_uuid} - Status: disapproved")
+    logger.info(f"  - All installments paid")
+    logger.info(f"  - Quote and Request auto-completed successfully")
+    logger.info("="*80)
 
 
 if __name__ == "__main__":
