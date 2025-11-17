@@ -440,7 +440,7 @@ Create or update an RFQ request.
 ```graphql
 {
   requestUuid: String
-  contactUuid: String!
+  email: String!
   requestTitle: String!
   requestDescription: String
   expiredAt: String
@@ -455,11 +455,11 @@ Create or update an RFQ request.
 ```graphql
 mutation {
   insertUpdateRequest(
-    contactUuid: "contact-123",
+    email: "buyer@customer.com",
     requestTitle: "Office supplies Q1",
     requestDescription: "Need supplies for new office",
     expiredAt: "2025-12-31",
-    status: "pending",
+    status: "initial",
     updatedBy: "MCP"
   ) {
     request {
@@ -504,7 +504,7 @@ mutation {
     shippingMethod: "express",
     shippingAmount: 50.0,
     taxAmount: 125.0,
-    status: "draft",
+    status: "initial",
     items: [
       {
         itemUuid: "item-A",
@@ -799,12 +799,12 @@ query {
 # Step 1: Submit RFQ Request (with empty items array)
 mutation {
   insertUpdateRequest(
-    contactUuid: "buyer@customer.com",
+    email: "buyer@customer.com",
     requestTitle: "Q1 Production Materials",
     requestDescription: "Need materials for production",
     expiredAt: "2025-12-31",
     items: [],
-    status: "pending",
+    status: "initial",
     updatedBy: "MCP"
   ) {
     request {
@@ -899,7 +899,7 @@ mutation {
     requestUuid: "req-456",
     providerCorpExternalId: "PROVIDER-001",
     salesRepEmail: "sales@provider1.com",
-    status: "draft",
+    status: "initial",
     updatedBy: "MCP"
   ) {
     quote {
@@ -973,7 +973,7 @@ mutation {
 mutation {
   insertUpdateQuote(
     quoteUuid: "quote-789",
-    status: "submitted",
+    status: "confirmed",
     updatedBy: "MCP"
   ) {
     quote {

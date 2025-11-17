@@ -60,9 +60,8 @@ sys.path.insert(0, os.path.join(base_dir, "silvaengine_dynamodb_base"))
 sys.path.insert(0, os.path.join(base_dir, "mcp_rfq_processor"))
 sys.path.insert(0, os.path.join(base_dir, "ai_rfq_engine"))
 
-from silvaengine_utility import Utility
-
 from mcp_rfq_processor.mcp_rfq_processor import MCPRfqProcessor
+from silvaengine_utility import Utility
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -289,15 +288,21 @@ REQUEST_GET_TEST_DATA = _TEST_DATA.get("request_get_test_data", [])
 REQUEST_LIST_TEST_DATA = _TEST_DATA.get("request_list_test_data", [])
 QUOTE_TEST_DATA = _TEST_DATA.get("quote_test_data", [])
 QUOTE_GET_TEST_DATA = _TEST_DATA.get("quote_get_test_data", [])
-CALCULATE_QUOTE_PRICING_TEST_DATA = _TEST_DATA.get("calculate_quote_pricing_test_data", [])
+CALCULATE_QUOTE_PRICING_TEST_DATA = _TEST_DATA.get(
+    "calculate_quote_pricing_test_data", []
+)
 QUOTE_LIST_TEST_DATA = _TEST_DATA.get("quote_list_test_data", [])
 QUOTE_ITEM_TEST_DATA = _TEST_DATA.get("quote_item_test_data", [])
 INSTALLMENT_TEST_DATA = _TEST_DATA.get("installment_test_data", [])
 INSTALLMENT_LIST_TEST_DATA = _TEST_DATA.get("installment_list_test_data", [])
 INSTALLMENT_UPDATE_TEST_DATA = _TEST_DATA.get("installment_update_test_data", [])
 INSTALLMENTS_CREATE_TEST_DATA = _TEST_DATA.get("installments_create_test_data", [])
-CONFIRM_REQUEST_AND_CREATE_QUOTES_TEST_DATA = _TEST_DATA.get("confirm_request_and_create_quotes_test_data", [])
-CONFIRM_QUOTE_AND_CREATE_INSTALLMENTS_TEST_DATA = _TEST_DATA.get("confirm_quote_and_create_installments_test_data", [])
+CONFIRM_REQUEST_AND_CREATE_QUOTES_TEST_DATA = _TEST_DATA.get(
+    "confirm_request_and_create_quotes_test_data", []
+)
+CONFIRM_QUOTE_AND_CREATE_INSTALLMENTS_TEST_DATA = _TEST_DATA.get(
+    "confirm_quote_and_create_installments_test_data", []
+)
 FILE_TEST_DATA = _TEST_DATA.get("file_test_data", [])
 
 
@@ -419,11 +424,15 @@ def test_get_provider_items(mcp_rfq_processor, test_data):
 
     # Verify that provider items have batches merged
     if "provider_item_list" in result or "providerItemList" in result:
-        provider_items = result.get("provider_item_list") or result.get("providerItemList")
+        provider_items = result.get("provider_item_list") or result.get(
+            "providerItemList"
+        )
         if provider_items and len(provider_items) > 0:
             for provider_item in provider_items:
                 # Verify each provider item has a batches array
-                assert "batches" in provider_item, "Each provider item should have a 'batches' field"
+                assert (
+                    "batches" in provider_item
+                ), "Each provider item should have a 'batches' field"
 
                 batches = provider_item.get("batches", [])
                 logger.info(
@@ -434,12 +443,18 @@ def test_get_provider_items(mcp_rfq_processor, test_data):
                 if batches:
                     for batch in batches:
                         # Verify batch has required fields
-                        assert "batch_no" in batch or "batchNo" in batch, "Batch should have batch_no"
+                        assert (
+                            "batch_no" in batch or "batchNo" in batch
+                        ), "Batch should have batch_no"
 
                         # Log batch details
                         batch_no = batch.get("batch_no") or batch.get("batchNo")
-                        slow_move = batch.get("slow_move_item") or batch.get("slowMoveItem")
-                        guardrail = batch.get("guardrail_price_per_uom") or batch.get("guardrailPricePerUom")
+                        slow_move = batch.get("slow_move_item") or batch.get(
+                            "slowMoveItem"
+                        )
+                        guardrail = batch.get("guardrail_price_per_uom") or batch.get(
+                            "guardrailPricePerUom"
+                        )
 
                         logger.info(
                             f"  Batch {batch_no}: slow_move={slow_move}, guardrail={guardrail}"
@@ -543,10 +558,10 @@ def test_get_discount_rules(mcp_rfq_processor, test_data):
 
     # Add optional filters - ONLY supported parameters by get_discount_rules
     optional_fields = [
-        "itemUuid",           # Filter by item
-        "providerItemUuid",   # Filter by provider item
-        "segmentUuid",        # Filter by customer segment
-        "subtotalValue",      # Find rules where subtotal_greater_than <= value < subtotal_less_than
+        "itemUuid",  # Filter by item
+        "providerItemUuid",  # Filter by provider item
+        "segmentUuid",  # Filter by customer segment
+        "subtotalValue",  # Find rules where subtotal_greater_than <= value < subtotal_less_than
         "maxDiscountPercentage",  # Filter by max discount percentage
         "minDiscountPercentage",  # Filter by min discount percentage
     ]
@@ -581,12 +596,18 @@ def test_get_discount_rules(mcp_rfq_processor, test_data):
             assert "discount_rule_uuid" in rule or "discountRuleUuid" in rule
 
             # Verify all returned rules have 'active' status (hardcoded in get_discount_rules)
-            assert rule.get("status") == "active", "All discount rules should have 'active' status"
+            assert (
+                rule.get("status") == "active"
+            ), "All discount rules should have 'active' status"
 
             # Verify discount rule specific fields and log details
-            subtotal_gt = rule.get("subtotal_greater_than") or rule.get("subtotalGreaterThan")
+            subtotal_gt = rule.get("subtotal_greater_than") or rule.get(
+                "subtotalGreaterThan"
+            )
             subtotal_lt = rule.get("subtotal_less_than") or rule.get("subtotalLessThan")
-            max_discount = rule.get("max_discount_percentage") or rule.get("maxDiscountPercentage")
+            max_discount = rule.get("max_discount_percentage") or rule.get(
+                "maxDiscountPercentage"
+            )
 
             logger.info(
                 f"Discount rule: subtotal range [{subtotal_gt}, {subtotal_lt}), "
@@ -612,16 +633,16 @@ def test_get_discount_rules(mcp_rfq_processor, test_data):
             if "max_discount_percentage" in arguments:
                 filter_max = arguments["max_discount_percentage"]
                 if max_discount is not None:
-                    assert max_discount <= filter_max, (
-                        f"Rule max_discount_percentage {max_discount} should be <= filter {filter_max}"
-                    )
+                    assert (
+                        max_discount <= filter_max
+                    ), f"Rule max_discount_percentage {max_discount} should be <= filter {filter_max}"
 
             if "min_discount_percentage" in arguments:
                 filter_min = arguments["min_discount_percentage"]
                 if max_discount is not None:
-                    assert max_discount >= filter_min, (
-                        f"Rule max_discount_percentage {max_discount} should be >= filter {filter_min}"
-                    )
+                    assert (
+                        max_discount >= filter_min
+                    ), f"Rule max_discount_percentage {max_discount} should be >= filter {filter_min}"
 
             logger.info(
                 f"Found {len(discount_rules)} active discount rule(s) with filters: {arguments}"
@@ -642,7 +663,7 @@ def test_submit_rfq_request(mcp_rfq_processor, test_data):
         mcp_rfq_processor,
         "submit_rfq_request",
         {
-            "contact_uuid": test_data.get("email"),
+            "email": test_data.get("email"),
             "request_title": test_data.get("requestTitle"),
             "request_description": test_data.get("requestDescription", ""),
         },
@@ -1345,7 +1366,9 @@ def test_calculate_quote_pricing(mcp_rfq_processor, test_data):
             assert "items" in group
 
             # Verify discount_rules are NOT at group level (they should be at item level)
-            assert "discount_rules" not in group, "discount_rules should not be at group level"
+            assert (
+                "discount_rules" not in group
+            ), "discount_rules should not be at group level"
 
             items = group.get("items", [])
             if items:
@@ -1362,7 +1385,9 @@ def test_calculate_quote_pricing(mcp_rfq_processor, test_data):
                     assert "price_tiers" in item
 
                     # Verify discount_rules at item level
-                    assert "discount_rules" in item, "discount_rules should be at item level"
+                    assert (
+                        "discount_rules" in item
+                    ), "discount_rules should be at item level"
 
                     discount_rules = item.get("discount_rules", [])
                     logger.info(
@@ -1373,11 +1398,18 @@ def test_calculate_quote_pricing(mcp_rfq_processor, test_data):
                     # If discount rules exist, verify their structure
                     if discount_rules:
                         for rule in discount_rules:
-                            assert "discount_rule_uuid" in rule or "discountRuleUuid" in rule
+                            assert (
+                                "discount_rule_uuid" in rule
+                                or "discountRuleUuid" in rule
+                            )
                             # Verify provider_item field was removed
-                            assert "provider_item" not in rule, "provider_item should be removed from discount rules"
+                            assert (
+                                "provider_item" not in rule
+                            ), "provider_item should be removed from discount rules"
 
-        logger.info(f"Found {len(groups)} pricing group(s) with item-level discount rules")
+        logger.info(
+            f"Found {len(groups)} pricing group(s) with item-level discount rules"
+        )
 
 
 @pytest.mark.integration
@@ -1404,6 +1436,7 @@ def test_add_quote_item(mcp_rfq_processor, test_data):
     assert error is None
     assert result is not None
     assert "quote_item_uuid" in result or "quoteItemUuid" in result
+
 
 # ============================================================================
 # INSTALLMENT TESTS
@@ -1613,7 +1646,9 @@ def test_confirm_quote_and_create_installments(mcp_rfq_processor, test_data):
     # Verify installments were created
     assert result["total_installments_created"] > 0
     # Verify installment type matches
-    expected_type = "single" if test_data.get("createSingleInstallment", True) else "multiple"
+    expected_type = (
+        "single" if test_data.get("createSingleInstallment", True) else "multiple"
+    )
     assert result["installment_type"] == expected_type
 
 

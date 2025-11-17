@@ -173,7 +173,7 @@ Submit a new RFQ request from a customer.
 **Input:**
 ```json
 {
-  "contact_uuid": "customer@example.com",
+  "email": "customer@example.com",
   "request_title": "Need 500 units of Product X",
   "request_description": "Detailed requirements...",
   "billing_address": {},
@@ -448,7 +448,7 @@ Search and filter quotes.
 {
   "request_uuid": "optional-request-uuid",
   "provider_corp_external_id": "PROVIDER-001",
-  "statuses": ["submitted", "accepted"],
+  "statuses": ["confirmed", "completed"],
   "min_total_quote_amount": 1000.00,
   "page_number": 1,
   "limit": 20
@@ -906,7 +906,7 @@ segment_uuid = segment_contacts[0]["segment_uuid"]
 
 # Step 1-3: Create request and add items
 request = processor.submit_rfq_request(
-    contact_uuid="buyer@customer.com",
+    email="buyer@customer.com",
     request_title="Q1 Production Materials",
     items=[]
 )
@@ -993,7 +993,7 @@ processor.create_installment(
 processor.update_quote(
     request_uuid=request_uuid,
     quote_uuid=quote["quote_uuid"],
-    status="submitted"
+    status="confirmed"
 )
 ```
 

@@ -140,7 +140,7 @@ class MCPRfqProcessor:
         self.logger.info(f"Submitting RFQ request: {arguments}")
 
         variables = {
-            "email": arguments["contact_uuid"],
+            "email": arguments["email"],
             "requestTitle": arguments["request_title"],
             "requestDescription": arguments.get("request_description", ""),
             "billingAddress": arguments.get("billing_address"),

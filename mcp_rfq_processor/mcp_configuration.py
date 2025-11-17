@@ -14,7 +14,7 @@ MCP_CONFIGURATION = {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "contact_uuid": {
+                    "email": {
                         "type": "string",
                         "description": "Email address of the contact submitting the request",
                     },
@@ -49,11 +49,11 @@ MCP_CONFIGURATION = {
                     },
                     "status": {
                         "type": "string",
-                        "description": "Request status (default: pending)",
-                        "enum": ["pending", "active", "completed", "cancelled"],
+                        "description": "Request status (default: initial)",
+                        "enum": ["initial", "in_progress", "confirmed", "completed", "modified"],
                     },
                 },
-                "required": ["contact_uuid", "request_title"],
+                "required": ["email", "request_title"],
             },
         },
         {
@@ -103,11 +103,11 @@ MCP_CONFIGURATION = {
                         "type": "string",
                         "description": "Updated status",
                         "enum": [
-                            "pending",
-                            "active",
-                            "modified",
+                            "initial",
+                            "in_progress",
+                            "confirmed",
                             "completed",
-                            "cancelled",
+                            "modified",
                         ],
                     },
                 },
@@ -431,13 +431,13 @@ MCP_CONFIGURATION = {
                     },
                     "status": {
                         "type": "string",
-                        "description": "Quote status (default: draft)",
+                        "description": "Quote status (default: initial)",
                         "enum": [
-                            "draft",
-                            "submitted",
-                            "approved",
-                            "rejected",
-                            "superseded",
+                            "initial",
+                            "in_progress",
+                            "confirmed",
+                            "completed",
+                            "disapproved",
                         ],
                     },
                     "notes": {"type": "string", "description": "Additional notes"},
@@ -475,11 +475,11 @@ MCP_CONFIGURATION = {
                         "type": "string",
                         "description": "Updated status",
                         "enum": [
-                            "draft",
-                            "submitted",
-                            "approved",
-                            "rejected",
-                            "superseded",
+                            "initial",
+                            "in_progress",
+                            "confirmed",
+                            "completed",
+                            "disapproved",
                         ],
                     },
                     "notes": {"type": "string", "description": "Updated notes"},
@@ -844,7 +844,11 @@ MCP_CONFIGURATION = {
                         "description": "Optional mapping of provider_corp_external_id to sales rep email",
                     },
                 },
-                "required": ["request_uuid", "provider_corp_external_ids", "segment_uuid"],
+                "required": [
+                    "request_uuid",
+                    "provider_corp_external_ids",
+                    "segment_uuid",
+                ],
             },
         },
         {
