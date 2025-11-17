@@ -13,8 +13,19 @@ The MCP RFQ Processor connects AI assistants to the `ai_rfq_engine` GraphQL back
 - **Document Management**: Upload and track RFQ-related files
 - **Segment Management**: Organize customers and providers into pricing segments
 
-**Current Version**: 1.1.0
+**Current Version**: 1.2.0
 **Total MCP Tools**: 26 (fully implemented and tested)
+
+### What's New in v1.2.0
+
+**Workflow Restrictions:**
+- **Quote Item Management**: Added status-based workflow restrictions
+  - `initial` status: Only `add_quote_item` allowed (add new items to quote)
+  - `in_progress` status: Only `update_quote_item` allowed (discount modifications only)
+  - `remove_quote_item` functionality is deprecated and should not be used
+- **Request Item Management**: Enhanced provider assignment workflow
+  - Use `assign_provider_item_to_request_item` to assign providers to request items
+  - Use `remove_provider_item_from_request_item` to remove provider assignments
 
 ### What's New in v1.1.0
 
@@ -450,7 +461,8 @@ Search and filter quotes.
 Add a line item to an existing quote.
 
 **Requirements**:
-- Quote must be in `initial` or `in_progress` status to modify items
+- Quote must be in `initial` status to add new items
+- Once quote moves to `in_progress` status, no new items can be added
 
 **Input:**
 ```json
@@ -470,7 +482,8 @@ Add a line item to an existing quote.
 Update an existing quote item (discount amount only).
 
 **Requirements**:
-- Quote must be in `initial` or `in_progress` status to modify items
+- Quote must be in `in_progress` status to apply discounts
+- Only discount modifications are allowed (discount amount adjustments)
 
 **Note**: Only `discount_amount` can be updated. Other fields (qty, provider_item_uuid, etc.) are read-only after creation.
 
@@ -569,13 +582,14 @@ Calculate grouped pricing from request with provider_items, returning applicable
       "provider_corp_external_id": "PROVIDER-001",
       "items": [
         {
-          "item_uuid": "item-uuid",
           "provider_item_uuid": "prov-item-uuid",
+          "item_uuid": "item-uuid",
           "batch_no": "LOT-2025-001",
           "qty": 500,
           "price_per_uom": 9.50,
           "guardrail_price_per_uom": 9.50,
           "slow_move_item": true,
+          "expired_at": "2026-03-15T00:00:00Z",
           "subtotal": 4750.00,
           "price_tiers": [...],
           "discount_rules": [...]
@@ -921,20 +935,24 @@ pricing = processor.calculate_quote_pricing(
     request_uuid=request_uuid,
     segment_uuid=segment_uuid
 )
-# Returns grouped pricing with discount_rules and price_tiers for LLM decision-making
+# Returns grouped pricing with item-level discount_rules and price_tiers for LLM decision-making
 # {
 #   "groups": [{
 #     "provider_corp_external_id": "PROVIDER-001",
 #     "items": [{
+#       "provider_item_uuid": "prov-item-uuid-1",
+#       "item_uuid": "item-uuid-1",
+#       "batch_no": "LOT-2025-001",
 #       "qty": 500,
 #       "price_per_uom": 9.50,
 #       "guardrail_price_per_uom": 9.50,
 #       "slow_move_item": true,
+#       "expired_at": "2026-03-15T00:00:00Z",
 #       "subtotal": 4750.00,
-#       "price_tiers": [...]  # Available pricing tiers
+#       "price_tiers": [...],      # Available pricing tiers for this item
+#       "discount_rules": [...]    # Applicable discount rules for this item (based on item subtotal)
 #     }],
-#     "subtotal": 4750.00,
-#     "discount_rules": [...]  # Applicable discount rules
+#     "subtotal": 4750.00
 #   }],
 #   "subtotal": 4750.00
 # }

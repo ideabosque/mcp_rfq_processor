@@ -61,22 +61,24 @@ request (completed)
 ```
 quote (initial)
     ↓
+    • add quote items (add_quote_item)
+    ↓
 quote (in_progress)
-    • add quote items
-    • update quote items (apply discount, adjust quantity)
-    • remove quote items
+    • apply discounts only (update_quote_item - discount modifications only)
+    • NO item additions or removals allowed
     ↓
 quote (confirmed)
     • create installment(s) with status=pending
+    • NO item modifications allowed
     ↓
 quote (completed) or quote (disapproved)
     • when completed: update installment(s) to status=paid
 ```
 
 **Quote Status Definitions:**
-- **initial**: Quote has been created but not yet being worked on
-- **in_progress**: Quote is being edited, items can be added/updated/removed
-- **confirmed**: Quote has been finalized and is awaiting approval/payment; installments should be created with `pending` status
+- **initial**: Quote has been created but not yet being worked on; only `add_quote_item` operations allowed
+- **in_progress**: Quote is being refined; only discount adjustments allowed via `update_quote_item` (no item additions or removals)
+- **confirmed**: Quote has been finalized and is awaiting approval/payment; installments should be created with `pending` status; no item modifications allowed
 - **completed**: Quote has been approved and all payment installments have been marked as `paid`
 - **disapproved**: Quote was rejected or invalidated (e.g., when parent request is modified)
 
@@ -116,16 +118,24 @@ installment (cancelled) [optional]
    - Old disapproved quotes remain in the system for audit trail purposes
 
 2. **Quote Item Management**
-   - Quote items can be freely added, updated, or removed while quote status is `initial` or `in_progress`
-   - Use `add_quote_item` to add new items to a quote
-   - Use `update_quote_item` to modify existing items (discount, quantity, etc.)
-   - Use `remove_quote_item` to remove items from a quote
+   - **Status-Based Workflow Restrictions:**
+     - `initial` status: Only allow adding quote items using `add_quote_item`
+     - `in_progress` status: Only allow applying discounts using `update_quote_item` (discount modifications only)
+     - `remove_quote_item` functionality is deprecated and should not be used
+   - **Operations by Status:**
+     - Initial: `add_quote_item` (add new items to quote)
+     - In Progress: `update_quote_item` (apply discount, adjust discount amount/percent only)
+     - Confirmed/Completed: No item modifications allowed
 
 3. **Request Item Management**
    - Request items can be freely added, updated, or removed while request status is `initial` or `in_progress`
-   - Use `update_rfq_request` with `items` array to bulk replace items
-   - Use `add_item_to_rfq_request` to add individual items
-   - Use `remove_item_from_rfq_request` to remove items by UUID or name
+   - **Provider Assignment Workflow:**
+     - Use `assign_provider_item_to_request_item` to assign provider to items in the request
+     - Use `remove_provider_item_from_request_item` to remove provider assignment from items
+   - **Item Operations:**
+     - Use `update_rfq_request` with `items` array to bulk replace items
+     - Use `add_item_to_rfq_request` to add individual items
+     - Use `remove_item_from_rfq_request` to remove items by UUID or name
 
 4. **Audit Trail**
    - All status changes are logged with timestamps
@@ -1631,6 +1641,7 @@ processor.update_installment(
 | 2025-11-10 | 1.0.0 | **PROJECT COMPLETED**:<br>- All 25 MCP tools fully implemented<br>- Kept flexible quote item operations (add/update/remove)<br>- Added convenience methods for request items<br>- Comprehensive test suite (1008 lines)<br>- Complete documentation (README, API Reference, Dev Plan)<br>- Streamlined segment management (read-only)<br>- Total tools: 25 (focused on RFQ workflow) | Development Team |
 | 2025-11-15 | 1.0.1 | **Documentation Updates**:<br>- Corrected version numbers in README.md<br>- Updated feature descriptions to match v0.1.0<br>- Synchronized documentation across all files<br>- Maintained 25 tools implementation status | Development Team |
 | 2025-11-15 | 1.1.0 | **Status Management Implementation**:<br>- Created `status_manager.py` module (398 lines)<br>- Added status constants: RequestStatus, QuoteStatus, InstallmentStatus<br>- Implemented status transition validation<br>- Added operation guards (prevent invalid operations)<br>- Implemented auto-disapprove quotes on request modification<br>- Implemented auto-complete quote when all installments paid<br>- Updated default status values to match development plan<br>- Exported status management in `__init__.py`<br>- Comprehensive status flow enforcement | Development Team |
+| 2025-11-16 | 1.2.0 | **Workflow Restrictions Update**:<br>- Added status-based quote item management restrictions<br>- Quote initial status: only allow `add_quote_item`<br>- Quote in_progress status: only allow discount updates via `update_quote_item`<br>- Deprecated `remove_quote_item` functionality<br>- Added provider assignment workflow for request items<br>- Updated Quote Status Flow diagram<br>- Updated Quote Status Definitions<br>- Enhanced Critical Business Rules section | Development Team |
 
 ---
 

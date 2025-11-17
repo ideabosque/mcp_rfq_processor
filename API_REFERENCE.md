@@ -4,8 +4,8 @@
 
 This document provides a comprehensive reference for the GraphQL API operations used by the MCP RFQ Processor, including all queries, mutations, and type definitions from the `ai_rfq_engine` GraphQL backend.
 
-**Version**: 1.1.0
-**Total MCP Tools**: 25 (all implemented)
+**Version**: 1.2.0
+**Total MCP Tools**: 26 (all implemented)
 **GraphQL Endpoint**: ai_rfq_graphql (AWS Lambda)
 
 ## Table of Contents
@@ -754,9 +754,9 @@ type Segment {
 | 10 | get_provider_item_batches | providerItemBatchList | Query | Item | Get batch info |
 | 11 | create_quote | insertUpdateQuote | Mutation | Quote | Create new quote |
 | 12 | update_quote | insertUpdateQuote | Mutation | Quote | Update quote metadata |
-| 13 | add_quote_item | insertUpdateQuoteItem | Mutation | Quote | Add item to quote |
-| 14 | update_quote_item | insertUpdateQuoteItem | Mutation | Quote | Update quote item |
-| 15 | remove_quote_item | deleteQuoteItem | Mutation | Quote | Remove item from quote |
+| 13 | add_quote_item | insertUpdateQuoteItem | Mutation | Quote | Add item to quote (initial status only) |
+| 14 | update_quote_item | insertUpdateQuoteItem | Mutation | Quote | Update quote item (in_progress status only, discount modifications) |
+| 15 | remove_quote_item | deleteQuoteItem | Mutation | Quote | **DEPRECATED** - Do not use |
 | 16 | get_quote | quote | Query | Quote | Retrieve quote |
 | 17 | search_quotes | quoteList | Query | Quote | Search quotes |
 | 18 | get_item_price_tiers | itemPriceTierList | Query | Pricing | Get tiered pricing (with qty filters) |
@@ -1110,7 +1110,11 @@ mutation {
 
 ## Notes
 
-1. **Flexible Quote Item Management**: The implementation allows adding, updating, and removing quote items directly using dedicated tools (`add_quote_item`, `update_quote_item`, `remove_quote_item`).
+1. **Status-Based Quote Item Management** (v1.2.0): Quote item operations are restricted by quote status:
+   - **initial status**: Only `add_quote_item` allowed to add new items
+   - **in_progress status**: Only `update_quote_item` allowed for discount modifications
+   - **remove_quote_item**: Deprecated and should not be used
+   - To change quote items after creation, modify the request and create a new quote
 
 2. **Request Item Convenience Methods**: Use `add_item_to_rfq_request` and `remove_item_from_rfq_request` for convenient single-item operations on requests.
 
