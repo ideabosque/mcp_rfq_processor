@@ -33,7 +33,13 @@ class RequestStatus:
     @classmethod
     def all_values(cls) -> Set[str]:
         """Get all valid request status values."""
-        return {cls.INITIAL, cls.IN_PROGRESS, cls.CONFIRMED, cls.COMPLETED, cls.MODIFIED}
+        return {
+            cls.INITIAL,
+            cls.IN_PROGRESS,
+            cls.CONFIRMED,
+            cls.COMPLETED,
+            cls.MODIFIED,
+        }
 
     @classmethod
     def is_valid(cls, status: str) -> bool:
@@ -411,14 +417,12 @@ def should_request_be_modified(
     return False
 
 
-def should_request_be_in_progress(
-    current_status: str, items_changed: bool
-) -> bool:
+def should_request_be_in_progress(current_status: str, items_changed: bool) -> bool:
     """
     Determine if request status should be changed to 'in_progress'.
 
-    Business Rule: When a modified request's items are being actively worked on,
-    the request should move back to 'in_progress' to indicate ongoing changes.
+    Business Rule: When a request in 'initial' or 'modified' status has items being actively worked on,
+    the request should move to 'in_progress' to indicate ongoing changes.
 
     Args:
         current_status: Current request status
@@ -427,8 +431,11 @@ def should_request_be_in_progress(
     Returns:
         True if request should be marked as in_progress
     """
-    # Auto-transition from modified to in_progress when items are being changed
-    if current_status == RequestStatus.MODIFIED and items_changed:
+    # Auto-transition from initial or modified to in_progress when items are being changed
+    if (
+        current_status == RequestStatus.MODIFIED
+        or current_status == RequestStatus.INITIAL
+    ) and items_changed:
         return True
     return False
 

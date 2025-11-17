@@ -241,6 +241,10 @@ SETTING = {
     },
     "endpoint_id": os.getenv("endpoint_id"),
     "execute_mode": os.getenv("execute_mode"),
+    "sales_rep_emails": {
+        "PROVIDER-001": "sales1@provider.com",
+        "PROVIDER-002": "sales2@provider.com",
+    },
 }
 
 
@@ -1592,7 +1596,6 @@ def test_confirm_request_and_create_quotes(mcp_rfq_processor, test_data):
             "request_uuid": test_data.get("requestUuid"),
             "provider_corp_external_ids": test_data.get("providerCorpExternalIds"),
             "segment_uuid": test_data.get("segmentUuid"),
-            "sales_rep_emails": test_data.get("salesRepEmails"),
         },
         "confirm_request_and_create_quotes",
     )

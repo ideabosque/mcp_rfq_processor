@@ -329,15 +329,13 @@ class MCPRfqProcessor:
 
         # Get new item details
         new_item = arguments["item"]
-        new_item_uuid = new_item.get("item_uuid") or new_item.get("itemUuid")
+        new_item_uuid = new_item.get("item_uuid")
 
         # Check if item already exists and merge quantity if so
         item_found = False
         if new_item_uuid:
             for existing_item in current_items:
-                existing_item_uuid = existing_item.get(
-                    "item_uuid"
-                ) or existing_item.get("itemUuid")
+                existing_item_uuid = existing_item.get("item_uuid")
                 if existing_item_uuid == new_item_uuid:
                     # Item exists - merge quantities
                     existing_qty = existing_item.get("qty", 0)
@@ -525,7 +523,10 @@ class MCPRfqProcessor:
             request_uuid: UUID of the request to confirm
             provider_corp_external_ids: List of provider corporation external IDs to create quotes for
             segment_uuid: Customer segment UUID (required for quote creation)
-            sales_rep_emails: Optional dict mapping provider_corp_external_id to sales rep email
+
+        Note:
+            Sales rep emails are retrieved from settings, grouped by provider_corp_external_id.
+            Settings should contain a 'sales_rep_emails' dictionary mapping provider_corp_external_id to email.
 
         Returns:
             Dictionary with confirmed request and list of created quotes with full details (including quote items)
@@ -535,7 +536,9 @@ class MCPRfqProcessor:
         request_uuid = arguments["request_uuid"]
         provider_corp_external_ids = arguments["provider_corp_external_ids"]
         segment_uuid = arguments["segment_uuid"]
-        sales_rep_emails = arguments.get("sales_rep_emails", {})
+
+        # Get sales_rep_emails from settings instead of arguments
+        sales_rep_emails = self.setting.get("sales_rep_emails", {})
 
         # Validate inputs
         validate_not_empty(request_uuid, "request_uuid", "Request UUID is required")
@@ -1605,6 +1608,14 @@ class MCPRfqProcessor:
         current_status = current_quote.get("status", "")
         QuoteOperationGuard.validate_can_modify_items(current_status)
 
+        # Check if quote status should be auto-updated to in_progress
+        should_update_status = False
+        if current_status == QuoteStatus.INITIAL:
+            should_update_status = True
+            self.logger.info(
+                f"Quote status will be changed to 'in_progress' because items are being actively added"
+            )
+
         variables = {
             "quoteUuid": arguments["quote_uuid"],
             "providerItemUuid": arguments["provider_item_uuid"],
@@ -1637,6 +1648,22 @@ class MCPRfqProcessor:
         self.logger.info(
             f"Successfully added quote item to quote {arguments['quote_uuid']}"
         )
+
+        # Update quote status to in_progress if needed
+        if should_update_status:
+            update_args = {
+                "quote_uuid": arguments["quote_uuid"],
+                "status": QuoteStatus.IN_PROGRESS,
+            }
+            if "request_uuid" in arguments:
+                update_args["request_uuid"] = arguments["request_uuid"]
+
+            update_result = self.update_quote(**update_args)
+            if error := propagate_error_if_present(update_result):
+                self.logger.warning(
+                    f"Failed to update quote status to in_progress: {error}"
+                )
+
         return quote_item
 
     # * MCP Function.

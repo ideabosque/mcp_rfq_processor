@@ -839,10 +839,6 @@ MCP_CONFIGURATION = {
                         "type": "string",
                         "description": "Customer segment UUID for pricing",
                     },
-                    "sales_rep_emails": {
-                        "type": "object",
-                        "description": "Optional mapping of provider_corp_external_id to sales rep email",
-                    },
                 },
                 "required": [
                     "request_uuid",
