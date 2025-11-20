@@ -1340,67 +1340,90 @@ Key Difference from Old Workflow:
 
 ### Modify Request Workflow (Simplified)
 
-This workflow follows the **Complete RFQ to Quote Workflow** (Steps 0-13) with modifications to existing requests.
+This workflow follows the **Complete RFQ to Quote Workflow** (Steps 0-14) with modifications to existing requests.
 
 ```
 Scenario: Customer wants to modify an existing request
 
 Current State:
-   ├─> Request UUID: req-123 (with items: [item-A, item-B])
-   └─> Quote UUID: quote-456 (status: "draft")
+   ├─> Request UUID: req-123 (status: "confirmed", items: [item-A, item-B])
+   └─> Quote UUID: quote-456 (status: "in_progress")
 
 Modification Options:
 
-A. Modify Request Items (Add/Remove Items)
-   └─> Step 1: Update request items
+A. Modify Request Items (Add/Remove Items) - Status Impact
+   └─> Step 1: Mark request as modified (Status: confirmed → modified)
+       └─> update_rfq_request(
+              request_uuid,
+              status="modified"
+           )
+       └─> All related quotes auto-transition to "disapproved"
+       └─> Business rule: Ensures quotes reflect current request state
+   
+   └─> Step 2: Update request items (Status: modified → in_progress)
        └─> add_item_to_rfq_request(request_uuid, item={item_uuid: "item-C", qty: 50})
            OR
        └─> remove_item_from_rfq_request(request_uuid, item_uuid="item-B")
            OR
        └─> update_rfq_request(request_uuid, items=[...updated items...])
+       └─> Request status auto-transitions to "in_progress"
    
-   └─> Step 2: Update provider_items assignment
+   └─> Step 3: Update provider_items assignment
        └─> Get updated request
        └─> Assign provider_items to new/modified items (Step 6 of main workflow)
    
-   └─> Step 3: Recalculate pricing
+   └─> Step 4: Recalculate pricing
        └─> calculate_quote_pricing(request_uuid, segment_uuid)
        └─> Present new pricing to user
    
-   └─> Step 4: Create new quote with updated items
-       └─> Follow Steps 8-13 of main workflow to create new quote
-       └─> Mark old quote as "superseded" (if exists)
+   └─> Step 5: Confirm request (Status: in_progress → confirmed)
+       └─> update_rfq_request(request_uuid, status="confirmed")
+       └─> Status validation ensures proper transition
+   
+   └─> Step 6: Create new quote with updated items
+       └─> Follow Steps 9-14 of main workflow to create new quote
+       └─> Old quotes remain "disapproved" for audit trail
        └─> New quote gets fresh quote_uuid with updated items
 
-B. Modify Quote Items Directly (Quantities/Discounts Only)
+B. Modify Quote Items Directly (Discounts Only) - Status Restrictions
+   └─> Only allowed when quote status is "initial" or "in_progress"
    └─> For existing quote items:
        └─> update_quote_item(
-              quote_uuid,
+              quote_uuid,  // Must be "initial" or "in_progress" status
               quote_item_uuid,
-              qty=150,  // Changed quantity
-              discount_amount=75.00  // Updated discount
+              discount_amount=75.00  // Only discount modifications allowed
            )
        └─> Backend recalculates subtotals automatically
+       └─> Quote remains in current status
    
-   └─> Note: Cannot add/remove items from quote without going through request
+   └─> Note: Cannot add/remove items or change quantities from quote
+   └─> Note: No modifications allowed when quote is "confirmed" or "completed"
 
-C. Modify Quote Metadata (Shipping, Status, Notes)
+C. Modify Quote Metadata (Shipping, Status, Notes) - Status Restrictions
+   └─> Metadata updates only allowed in "initial" or "in_progress" status
    └─> update_quote(
-          quote_uuid,
+          quote_uuid,  // Must be "initial" or "in_progress" status
           shipping_method="Express",
           shipping_amount=100.00,
-          status="submitted",
           notes="Updated shipping"
        )
+   └─> Status transitions allowed with validation:
+       └─> update_quote(
+              quote_uuid,
+              status="confirmed",  // Validates transition is allowed
+              notes="Ready for payment"
+           )
 
-Key Principles for Modifications:
-   1. Items are managed at REQUEST level (add/remove via request tools)
-   2. Provider_items must be reassigned after request item changes
-   3. Recalculate pricing after any item/provider changes (Step 7)
-   4. Adding/removing items ALWAYS requires creating a new quote
-   5. Existing quotes can only be modified for quantities, discounts, or metadata
-   6. Always mark old quotes as "superseded" when creating new quote
-   7. Always get user confirmation before applying changes
+Key Principles for Modifications (Status-Aware):
+   1. Request modifications trigger status flow: confirmed → modified → in_progress → confirmed
+   2. Modified requests auto-disapprove ALL related quotes (business rule)
+   3. Quote modifications restricted by current status (operation guards)
+   4. Provider_items must be reassigned after request item changes
+   5. Recalculate pricing after any item/provider changes (Step 7)
+   6. Adding/removing items ALWAYS requires going through request modification flow
+   7. Status transitions are validated at each step
+   8. Disapproved quotes remain for audit trail (not deleted)
+   9. Always get user confirmation before applying changes
 ```
 
 ### Discount Management Workflow
