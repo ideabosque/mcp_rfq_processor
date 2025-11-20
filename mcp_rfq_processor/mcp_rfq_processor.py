@@ -956,6 +956,46 @@ class MCPRfqProcessor:
         item_uuid = arguments["item_uuid"]
         provider_item_uuid = arguments["provider_item_uuid"]
         provider_corp_external_id = arguments["provider_corp_external_id"]
+
+        # Validate that the provider item belongs to the specified provider
+        provider_item_result = self._execute_graphql_query(
+            "ai_rfq_graphql",
+            "providerItem",
+            "Query",
+            {"providerItemUuid": provider_item_uuid},
+        )
+
+        if error := propagate_error_if_present(provider_item_result):
+            return error
+
+        provider_item = humps.decamelize(provider_item_result.get("providerItem"))
+
+        if not provider_item:
+            raise ValidationError(
+                message=f"Provider item with UUID '{provider_item_uuid}' not found",
+                error_code=ErrorCode.ITEM_NOT_FOUND,
+                details={"provider_item_uuid": provider_item_uuid},
+            )
+
+        actual_provider_corp_id = provider_item.get("provider_corp_external_id")
+        if (
+            actual_provider_corp_id
+            and actual_provider_corp_id != provider_corp_external_id
+        ):
+            raise ValidationError(
+                message=(
+                    f"Provider item '{provider_item_uuid}' belongs to provider "
+                    f"'{actual_provider_corp_id}', cannot assign to "
+                    f"'{provider_corp_external_id}'"
+                ),
+                error_code=ErrorCode.VALIDATION_FAILED,
+                details={
+                    "provider_item_uuid": provider_item_uuid,
+                    "expected_provider_corp_external_id": provider_corp_external_id,
+                    "actual_provider_corp_external_id": actual_provider_corp_id,
+                },
+            )
+
         batch_no = arguments.get("batch_no")
         provider_qty = arguments.get("qty")
         add_qty = arguments.get("add_qty", False)  # Default to replace behavior
