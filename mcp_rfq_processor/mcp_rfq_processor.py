@@ -47,7 +47,7 @@ class MCPRfqProcessor:
         self.graphql_client = GraphQLClient(logger, **setting)
 
     @property
-    def endpoint_id(self) -> str:
+    def endpoint_id(self) -> str | None:
         return self.graphql_client.endpoint_id
 
     @endpoint_id.setter
@@ -1578,8 +1578,7 @@ class MCPRfqProcessor:
         # Only apply this validation if we're NOT doing a status change
         # (Status changes can include notes to document the reason for the change)
         is_updating_metadata = any(
-            key in arguments
-            for key in ["shipping_method", "shipping_amount", "notes"]
+            key in arguments for key in ["shipping_method", "shipping_amount", "notes"]
         )
         if is_updating_metadata and "status" not in arguments:
             QuoteOperationGuard.validate_can_modify_items(current_status)
@@ -2521,8 +2520,10 @@ class MCPRfqProcessor:
                     )
 
                     # Get the request_uuid from the quote object in the installment
-                    request_uuid = installment.get("quote", {}).get("request", {}).get(
-                        "request_uuid"
+                    request_uuid = (
+                        installment.get("quote", {})
+                        .get("request", {})
+                        .get("request_uuid")
                     )
 
                     # Update quote status to completed

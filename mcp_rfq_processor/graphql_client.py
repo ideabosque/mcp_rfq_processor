@@ -13,6 +13,7 @@ import traceback
 from typing import Any, Dict
 
 import boto3
+from botocore.client import BaseClient
 from silvaengine_utility import Utility
 
 from .error_handler import (
@@ -34,14 +35,14 @@ class GraphQLClient:
         self._aws_lambda = self._initialize_aws_lambda_client(**setting)
 
     @property
-    def endpoint_id(self) -> str:
+    def endpoint_id(self) -> str | None:
         return self._endpoint_id
 
     @endpoint_id.setter
     def endpoint_id(self, value: str):
         self._endpoint_id = value
 
-    def _initialize_aws_lambda_client(self, **setting: Dict[str, Any]) -> boto3.client:
+    def _initialize_aws_lambda_client(self, **setting: Dict[str, Any]) -> BaseClient:
         """Initialize AWS Lambda client with credentials from settings."""
         region_name = setting.get("region_name")
         aws_access_key_id = setting.get("aws_access_key_id")
