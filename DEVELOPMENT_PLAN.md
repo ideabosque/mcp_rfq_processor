@@ -1126,15 +1126,16 @@ This is the recommended end-to-end workflow for processing RFQ requests with the
        └─> Returns: segment_uuid for pricing rules
        └─> If not found, create segment or use default
 
-1. Submit RFQ Request
+1. Submit RFQ Request (Status: initial)
    └─> submit_rfq_request(
           contact_uuid=user_email,
           request_title="Office supplies procurement",
           request_description="Need supplies for Q1",
           items=[],  // Empty initially
+          status="initial",  // Default status
           expired_at="2025-12-31"
        )
-       └─> Returns: request_uuid
+       └─> Returns: request_uuid with status="initial"
 
 2. Lookup Items with End User
    └─> search_items(item_name="printer paper")
@@ -1142,7 +1143,7 @@ This is the recommended end-to-end workflow for processing RFQ requests with the
        └─> Present catalog to user for selection
        └─> User selects items with desired quantities
 
-3. Add Items to Request
+3. Add Items to Request (Status: initial → in_progress)
    └─> For each selected item:
        └─> add_item_to_rfq_request(
               request_uuid,
@@ -1154,6 +1155,7 @@ This is the recommended end-to-end workflow for processing RFQ requests with the
               }
            )
        └─> Items added with empty provider_items array
+       └─> Request status auto-transitions to "in_progress"
 
 4. Lookup Provider Items for Each Item
    └─> For each request item:
@@ -1203,36 +1205,45 @@ This is the recommended end-to-end workflow for processing RFQ requests with the
            └─> Guardrail pricing and slow_move_item flags
        └─> Present pricing options to user
 
-8. Generate Quotes by Confirmation
+8. Confirm Request (Status: in_progress → confirmed)
+   └─> update_rfq_request(
+          request_uuid,
+          status="confirmed"
+       )
+       └─> Request is now ready for quote creation
+       └─> Status validation ensures proper transition
+
+9. Generate Quotes by Confirmation (Status: initial)
    └─> For each selected provider group:
        └─> create_quote(
-              request_uuid,
+              request_uuid,  // Must be "confirmed" status
               provider_corp_external_id="PROV-001",
               segment_uuid,
-              status="draft"
+              status="initial"  // Default status
            )
            └─> Quote items auto-created from request provider_items
+           └─> Quote status auto-transitions to "in_progress"
            └─> Returns: quote_uuid
        └─> Multiple quotes possible (one per provider)
 
-9. Negotiate with End User
-   └─> Present price tiers and discount rules
-       └─> LLM can lookup additional details:
-           ├─> get_item_price_tiers(
-                  item_uuid,
-                  provider_item_uuid,
-                  segment_uuid,
-                  max_quantity_greater_then=qty
-               )
-               └─> "If you order 200 instead of 100, price drops to $45/unit"
-           └─> get_discount_rules(
-                  segment_uuid,
-                  max_subtotal_greater_than=subtotal
-               )
-               └─> "Your subtotal qualifies for 10% group discount"
-       └─> User confirms or negotiates pricing
+10. Negotiate with End User
+    └─> Present price tiers and discount rules
+        └─> LLM can lookup additional details:
+            ├─> get_item_price_tiers(
+                   item_uuid,
+                   provider_item_uuid,
+                   segment_uuid,
+                   max_quantity_greater_then=qty
+                )
+                └─> "If you order 200 instead of 100, price drops to $45/unit"
+            └─> get_discount_rules(
+                   segment_uuid,
+                   max_subtotal_greater_than=subtotal
+                )
+                └─> "Your subtotal qualifies for 10% group discount"
+        └─> User confirms or negotiates pricing
 
-10. Apply Discounts with User Confirmation
+11. Apply Discounts with User Confirmation (Status: in_progress)
     └─> For each quote item with approved discount:
         └─> update_quote_item(
                quote_uuid,
@@ -1240,8 +1251,9 @@ This is the recommended end-to-end workflow for processing RFQ requests with the
                discount_amount=500.00
             )
         └─> Backend recalculates subtotals automatically
+        └─> Quote remains in "in_progress" status
 
-11. Update Quote with Shipping
+12. Update Quote with Shipping (Status: in_progress)
     └─> update_quote(
            quote_uuid,
            shipping_method="Standard Ground",
@@ -1249,31 +1261,36 @@ This is the recommended end-to-end workflow for processing RFQ requests with the
            notes="Delivery within 5-7 business days"
         )
         └─> Backend recalculates final_total_quote_amount
+        └─> Quote remains in "in_progress" status
 
-12. Confirm Quote and Generate Installment Plan
-    └─> User confirms quote for purchase
+13. Confirm Quote and Generate Installment Plan (Status: in_progress → confirmed)
+    └─> User confirms quote for purchase:
+        └─> update_quote(quote_uuid, status="confirmed")
+        └─> Status validation ensures proper transition
+    └─> Create installments with "pending" status:
         └─> create_installment(
-               quote_uuid,
-               installment_number=1,
-               due_date="2025-12-01",
-               amount=5000.00,
-               status="pending"
+               quote_uuid,  // Must be "confirmed" status
+               request_uuid,
+               installment_amount=5000.00,
+               status="pending"  // Default status
             )
         └─> Repeat for additional installments
         └─> installment_ratio auto-calculated by backend
 
-13. Complete Quote and Process Payment
-    └─> Update quote status:
-        └─> update_quote(quote_uuid, status="approved")
-    └─> Process first installment payment (if applicable):
+14. Complete Quote and Process Payment (Status: confirmed → completed)
+    └─> Process installment payments:
         └─> External payment processing
-        └─> Update installment:
+        └─> Update each installment:
             └─> update_installment(
+                   quote_uuid,
                    installment_uuid,
                    status="paid"
                 )
-    └─> Mark quote as completed:
-        └─> update_quote(quote_uuid, status="completed")
+            └─> Status validation ensures proper transition
+    └─> When all installments are "paid":
+        └─> Quote status auto-transitions to "completed"
+        └─> Request status auto-transitions to "completed"
+        └─> Competing quotes auto-transition to "disapproved"
 ```
 
 ### Key Workflow Principles
