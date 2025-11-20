@@ -13,79 +13,27 @@ The MCP RFQ Processor connects AI assistants to the `ai_rfq_engine` GraphQL back
 - **Document Management**: Upload and track RFQ-related files
 - **Segment Management**: Organize customers and providers into pricing segments
 
-**Current Version**: 1.3.0
-**Total MCP Tools**: 26 (fully implemented and tested)
+**Current Version**: 0.1.0  
+**Total MCP Tools**: 29 (implemented in `mcp_configuration.py`)
 
-### What's New in v1.3.0
+### Current Feature Highlights
 
-**Enhanced Auto-Completion and Auto-Disapproval:**
-- **Auto-Complete Quote**: When all installments for a quote are marked as 'paid', the quote automatically transitions to 'completed' status with note "Auto-completed: All installments paid"
-- **Auto-Complete Request**: When at least one quote reaches 'completed' status, the request automatically transitions to 'completed' status
-- **Auto-Disapprove Competing Quotes**: When one quote is confirmed, all other quotes for the same request are automatically disapproved (excluding quotes already in terminal states: completed, disapproved)
-  - Only affects quotes in 'initial' or 'in_progress' status
-  - Adds note "Auto-disapproved: Another quote was confirmed"
-
-**Validation Improvements:**
-- **Quote Update Restrictions**: Metadata updates (shipping_method, shipping_amount, notes) are only allowed when quote is in 'initial' or 'in_progress' status
-  - Exception: Status transitions can include notes to document the reason for the change
-- **Helper Functions**: Added `should_request_be_completed()` and enhanced `should_quote_be_completed()` in status_manager
-
-**Complete Workflow:**
-The system now supports a fully automated workflow:
-1. Create request → Confirm request and create quotes for multiple providers
-2. Confirm one quote → Other quotes automatically disapproved
-3. Pay all installments → Quote automatically completed → Request automatically completed
-
-### What's New in v1.2.0
-
-**Workflow Restrictions:**
-- **Quote Item Management**: Added status-based workflow restrictions
-  - `initial` status: Only `add_quote_item` allowed (add new items to quote)
-  - `in_progress` status: Only `update_quote_item` allowed (discount modifications only)
-  - `remove_quote_item` functionality is deprecated and should not be used
-- **Request Item Management**: Enhanced provider assignment workflow
-  - Use `assign_provider_item_to_request_item` to assign providers to request items
-  - Use `remove_provider_item_from_request_item` to remove provider assignments
-
-### What's New in v1.1.0
-
-**Status Management System:**
-- **NEW: Comprehensive Status Management**: Enforces request/quote/installment status flows with transition validation
-- **Status Constants**: RequestStatus, QuoteStatus, InstallmentStatus classes for type-safe status values
-- **Automatic Business Rules**:
-  - Auto-disapprove all quotes when request is modified
-  - Auto-complete quote when all installments are paid
-  - Auto-transition request to "in_progress" when items are modified
-- **Operation Guards**: Prevent invalid operations (e.g., can't create quotes from non-confirmed requests)
-- **Default Status Values**: Requests default to "initial", quotes default to "initial"
-
-**API Improvements:**
-- **Simplified Price Tier Lookup**: `get_item_price_tiers` now uses `quantity_value` parameter (finds matching tier for specific quantity)
-- **Simplified Discount Rules**: `get_discount_rules` now uses `subtotal_value` parameter with required item/provider/segment parameters
-- **Item-Level Discount Rules**: `calculate_quote_pricing` returns discount rules per item (based on item subtotal) instead of group-level
-
-**Enhanced Testing:**
-- Updated test suite to validate status transitions and business rules
-- Tests for item-level discount rules in quote pricing
-
-### v0.1.0 Features
-
-**Major Features:**
-- **Complete RFQ Workflow**: End-to-end request for quotation processing from customer inquiry to final quote submission
-- **`calculate_quote_pricing` Tool**: Groups request items by provider/segment, returns pricing with applicable discount rules and price tiers for LLM-driven decision making
-- **Flexible Quote Management**: Direct quote item operations (add/update/remove) for better usability
-- **Comprehensive Testing**: Unit tests covering all 25 tools
-
-**Backend Integration Features:**
-- **Slow Move Item Tracking**: Automatically identify slow-moving inventory with `slow_move_item` flag and guardrail pricing
-- **Auto-calculated Negotiation Rounds**: Backend automatically tracks quote `rounds` per provider
-- **Auto-calculated Installment Ratio**: `installment_ratio` computed automatically based on `installment_amount` and quote total
-- **Simplified Quote Creation**: `shipping_method` and `shipping_amount` can only be set via `update_quote`, not during creation
-
-**Streamlined Tools (25 total):**
-- **Removed**: `create_segment` and `add_contact_to_segment` (segments managed via backend admin)
-- **Kept**: `get_segment_contacts` for read-only segment lookups
-- **Added**: Convenience methods `add_item_to_rfq_request` and `remove_item_from_rfq_request`
+- **Status-Aware Workflow Controls**
+  - Requests, quotes, and installments enforce validated transitions with guard rails
+  - Auto-update request status to `in_progress` when items change
+  - Quotes auto-transition to `in_progress` when items are created
+- **Automatic Business Rules**
+  - Auto-disapprove quotes when a request is marked `modified`
+  - Auto-complete quotes when all installments are `paid`, then auto-complete the request
+  - When one quote is confirmed, competing quotes are disapproved (unless already terminal)
+- **Provider Assignment Helpers**
+  - `assign_provider_item_to_request_item` and `remove_provider_item_from_request_item` manage provider links on requests
+  - Quote creation pulls assigned provider items to build quote items automatically
+- **Pricing Intelligence**
+  - `calculate_quote_pricing` groups request items by provider/segment and attaches batch pricing, guardrails, price tiers, and discount rules
+  - Item-level discount and price tier lookup utilities for LLM prompting
+- **Workflow Convenience**
+  - `confirm_request_and_create_quotes` and `confirm_quote_and_create_installments` wrap multi-step flows for quicker automation
 
 See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for complete workflow documentation.
 
@@ -181,9 +129,9 @@ processor.endpoint_id = "your-endpoint-id"
 
 ## Available MCP Tools
 
-All 25 tools are fully implemented and production-ready.
+All 29 tools are defined in `mcp_configuration.py` and exposed by `MCPRfqProcessor`.
 
-### 1. Request Management (6 tools)
+### 1. Request Management (8 tools)
 
 #### `submit_rfq_request`
 Submit a new RFQ request from a customer.
@@ -264,6 +212,12 @@ Convenience method to remove a single item from an existing request.
 ```
 
 **Output:** Updated request with item removed.
+
+#### `assign_provider_item_to_request_item`
+Attach a provider item (and optional batch/quantity) to a request item. Validates that the provider item belongs to the specified provider and updates status to `in_progress` when needed.
+
+#### `remove_provider_item_from_request_item`
+Remove provider assignments from a request item. Can target a specific provider item/batch or clear all provider items for the request item.
 
 #### `get_rfq_request`
 Retrieve details of an existing RFQ request.
@@ -374,23 +328,9 @@ Get batch/lot information for provider items including slow_move_item flag and g
 
 **Note:** If neither expired_at_gt nor expired_at_lt is provided, defaults to filtering batches expiring 90+ days from now.
 
-#### `get_provider_item_batches`
-Get batch information for provider inventory.
-
-**Input:**
-```json
-{
-  "provider_item_uuid": "provider-item-uuid",
-  "in_stock": true,
-  "expired_at_gt": "2025-11-05T00:00:00Z"
-}
-```
-
-**Output:** List of batches with lot numbers, expiry dates, and stock levels.
-
 ---
 
-### 3. Quote Management (8 tools)
+### 3. Quote Management (5 tools)
 
 #### `create_quote`
 Generate a new quote for an RFQ request.
@@ -403,6 +343,7 @@ Generate a new quote for an RFQ request.
 **Note**:
 - `shipping_method` and `shipping_amount` cannot be set during creation - use `update_quote` after creation
 - `rounds` (negotiation rounds) is auto-calculated by the backend
+- Quote items are created automatically from the provider assignments on the request for the selected provider
 
 **Input:**
 ```json
@@ -477,29 +418,8 @@ Search and filter quotes.
 
 **Output:** Paginated list of matching quotes.
 
-#### `add_quote_item`
-Add a line item to an existing quote.
-
-**Requirements**:
-- Quote must be in `initial` status to add new items
-- Once quote moves to `in_progress` status, no new items can be added
-
-**Input:**
-```json
-{
-  "quote_uuid": "quote-uuid",
-  "provider_item_uuid": "provider-item-uuid",
-  "item_uuid": "item-uuid",
-  "qty": 100,
-  "batch_no": "BATCH-2025-001",
-  "discount_amount": 50.00
-}
-```
-
-**Output:** Created quote item with calculated totals.
-
 #### `update_quote_item`
-Update an existing quote item (discount amount only).
+Update an existing quote item (discount amount only). Used to apply discounts after quote items are created.
 
 **Requirements**:
 - Quote must be in `in_progress` status to apply discounts
@@ -838,7 +758,19 @@ Retrieve installments for a quote.
 
 ---
 
-### 6. Document Management (2 tools)
+### 6. Workflow Convenience (2 tools)
+
+These helpers combine multiple operations and enforce the same business rules described above.
+
+#### `confirm_request_and_create_quotes`
+Sets a request to `confirmed` and creates quotes for a list of providers in one call. Uses provider assignments on the request to generate quote items. Sales rep emails can be supplied via settings (`sales_rep_emails` mapping).
+
+#### `confirm_quote_and_create_installments`
+Confirms a quote, disapproves competing quotes for the same request, and creates a single installment or an installment schedule.
+
+---
+
+### 7. Document Management (2 tools)
 
 #### `upload_rfq_file`
 Upload a document related to an RFQ request.
@@ -871,7 +803,7 @@ Retrieve files associated with a request.
 
 ---
 
-### 7. Segment Management (1 tool)
+### 8. Segment Management (1 tool)
 
 **Note:** Segments are typically managed through the backend admin interface. This tool provides read-only access to segment-contact associations for pricing lookups.
 
@@ -977,20 +909,24 @@ pricing = processor.calculate_quote_pricing(
 #   "subtotal": 4750.00
 # }
 
-# Step 8-10: Create quote and add items with user-confirmed discount
+# Step 8-10: Create quote (quote items are auto-created from provider assignments)
 quote = processor.create_quote(
     request_uuid=request_uuid,
     provider_corp_external_id="PROVIDER-001",
     sales_rep_email="sales@provider1.com"
 )
 
-processor.add_quote_item(
+# Apply discount to the created quote item
+full_quote = processor.get_quote(
+    request_uuid=request_uuid,
     quote_uuid=quote["quote_uuid"],
-    provider_item_uuid="prov-item-uuid-1",
-    item_uuid="item-uuid-1",
-    segment_uuid=segment_uuid,
-    qty=500,
-    batch_no="LOT-2025-001",
+)
+first_quote_item_uuid = full_quote["quote_items"][0]["quote_item_uuid"]
+
+processor.update_quote_item(
+    quote_uuid=quote["quote_uuid"],
+    quote_item_uuid=first_quote_item_uuid,
+    request_uuid=request_uuid,
     discount_amount=237.50  # 5% slow-move discount (user confirmed)
 )
 

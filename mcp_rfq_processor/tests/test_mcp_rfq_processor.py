@@ -271,20 +271,20 @@ SETTING = {
 def test_confirm_specific_quote_and_create_installment(mcp_rfq_processor):
     """
     Test confirming specific quote and creating single installment.
-    
+
     Test data:
     - request_uuid: 76533422114551572976
     - quote_uuid: 68441099441864123909
     """
     logger.info("CONFIRM SPECIFIC QUOTE AND CREATE SINGLE INSTALLMENT")
-    
+
     # Test data
     request_uuid = "76533422114551572976"
     quote_uuid = "68441099441864123909"
-    
+
     logger.info(f"Request UUID: {request_uuid}")
     logger.info(f"Quote UUID: {quote_uuid}")
-    
+
     # Confirm quote and create single installment
     result, error = _call_method(
         mcp_rfq_processor,
@@ -293,43 +293,47 @@ def test_confirm_specific_quote_and_create_installment(mcp_rfq_processor):
             "request_uuid": request_uuid,
             "quote_uuid": quote_uuid,
             "create_single_installment": True,
-            "payment_method": "bank_transfer"
+            "payment_method": "bank_transfer",
         },
-        "confirm_quote_and_create_single_installment"
+        "confirm_quote_and_create_single_installment",
     )
-    
+
     if error is None:
         logger.info("SUCCESS! Quote confirmed and installment created:")
         logger.info(f"  Quote Status: {result.get('quote', {}).get('status')}")
-        logger.info(f"  Installments Created: {result.get('total_installments_created')}")
+        logger.info(
+            f"  Installments Created: {result.get('total_installments_created')}"
+        )
         logger.info(f"  Installment Type: {result.get('installment_type')}")
-        
+
         # Verify results
         assert "quote" in result
         assert "installments" in result
         assert "total_installments_created" in result
         assert "installment_type" in result
-        
+
         # Verify quote was confirmed
         assert result["quote"]["status"] == "confirmed"
-        
+
         # Verify single installment was created
         assert result["total_installments_created"] == 1
         assert result["installment_type"] == "single"
-        
+
         # Display installment details
-        installments = result.get('installments', [])
+        installments = result.get("installments", [])
         if installments:
             installment = installments[0]
             logger.info(f"  Installment UUID: {installment.get('installment_uuid')}")
-            logger.info(f"  Installment Amount: ${installment.get('installment_amount')}")
+            logger.info(
+                f"  Installment Amount: ${installment.get('installment_amount')}"
+            )
             logger.info(f"  Status: {installment.get('status')}")
             logger.info(f"  Payment Method: {installment.get('payment_method')}")
     else:
         logger.warning(f"Backend error encountered: {error}")
         # Still pass test if we can validate the method call structure
         assert error is not None
-    
+
     logger.info("Quote confirmation and installment creation test completed")
 
 
@@ -349,17 +353,17 @@ def test_discount_application_workflow(mcp_rfq_processor):
     4. Verify totals are correct
     """
     logger.info("DISCOUNT APPLICATION WORKFLOW TEST")
-    
+
     # Test data from existing test data
     item_uuid = "04540718329890843199"
     provider_item_uuid = "76109526415051866240"
     segment_uuid = "99438521399025614976"
     quote_uuid = "67521216836950573184"
     quote_item_uuid = "14492344248022541829"
-    
+
     # Step 1: Get discount rules for the provider item
     logger.info("[Step 1] Getting discount rules...")
-    
+
     discount_result, discount_error = _call_method(
         mcp_rfq_processor,
         "get_discount_rules",
@@ -368,31 +372,37 @@ def test_discount_application_workflow(mcp_rfq_processor):
             "provider_item_uuid": provider_item_uuid,
             "segment_uuid": segment_uuid,
             "subtotal_value": 1000.0,
-            "limit": 10
+            "limit": 10,
         },
-        "get_discount_rules_for_application"
+        "get_discount_rules_for_application",
     )
-    
+
     assert discount_error is None
     assert discount_result is not None
-    
+
     logger.info(f"Found {discount_result.get('total', 0)} discount rules")
-    
+
     # Step 2: Apply discount if rules exist
-    rule_list = discount_result.get('discount_rule_list') or discount_result.get('discountRuleList', [])
-    
+    rule_list = discount_result.get("discount_rule_list") or discount_result.get(
+        "discountRuleList", []
+    )
+
     if rule_list:
         rule = rule_list[0]  # Use first rule
-        max_discount = rule.get('max_discount_percentage') or rule.get('maxDiscountPercentage')
-        
+        max_discount = rule.get("max_discount_percentage") or rule.get(
+            "maxDiscountPercentage"
+        )
+
         if max_discount:
             # Calculate discount (use 50% of max allowed)
             test_subtotal = 1000.0
             discount_percentage = max_discount * 0.5
             discount_amount = test_subtotal * (discount_percentage / 100)
-            
-            logger.info(f"[Step 2] Applying {discount_percentage}% discount (${discount_amount:.2f})")
-            
+
+            logger.info(
+                f"[Step 2] Applying {discount_percentage}% discount (${discount_amount:.2f})"
+            )
+
             # Step 3: Apply discount to quote item
             update_result, update_error = _call_method(
                 mcp_rfq_processor,
@@ -400,29 +410,33 @@ def test_discount_application_workflow(mcp_rfq_processor):
                 {
                     "quote_uuid": quote_uuid,
                     "quote_item_uuid": quote_item_uuid,
-                    "discount_amount": discount_amount
+                    "discount_amount": discount_amount,
                 },
-                "apply_discount_to_quote_item"
+                "apply_discount_to_quote_item",
             )
-            
+
             if update_error is None:
                 logger.info("[Step 3] Discount applied successfully")
-                
+
                 # Verify discount was applied
-                applied_discount = update_result.get('discount_amount') or update_result.get('discountAmount')
+                applied_discount = update_result.get(
+                    "discount_amount"
+                ) or update_result.get("discountAmount")
                 logger.info(f"Applied discount: ${applied_discount}")
-                
-                assert abs(applied_discount - discount_amount) < 0.01, f"Discount mismatch: expected {discount_amount}, got {applied_discount}"
+
+                assert (
+                    abs(applied_discount - discount_amount) < 0.01
+                ), f"Discount mismatch: expected {discount_amount}, got {applied_discount}"
                 logger.info("SUCCESS: Discount application verified!")
             else:
                 logger.warning(f"Quote item update failed: {update_error}")
                 # Still pass test if we validated discount rules
     else:
         logger.info("No discount rules found - testing rule validation instead")
-        
+
         # Test discount rules with different subtotals
         test_subtotals = [500.0, 1000.0, 2000.0]
-        
+
         for subtotal in test_subtotals:
             rules_result, rules_error = _call_method(
                 mcp_rfq_processor,
@@ -432,14 +446,16 @@ def test_discount_application_workflow(mcp_rfq_processor):
                     "provider_item_uuid": provider_item_uuid,
                     "segment_uuid": segment_uuid,
                     "subtotal_value": subtotal,
-                    "limit": 5
+                    "limit": 5,
                 },
-                f"test_discount_rules_subtotal_{subtotal}"
+                f"test_discount_rules_subtotal_{subtotal}",
             )
-            
+
             assert rules_error is None
-            logger.info(f"Subtotal ${subtotal}: {rules_result.get('total', 0)} rules found")
-    
+            logger.info(
+                f"Subtotal ${subtotal}: {rules_result.get('total', 0)} rules found"
+            )
+
     logger.info("Discount application workflow test completed successfully")
 
 
@@ -1994,9 +2010,9 @@ def test_complete_workflow_with_auto_disapproval(mcp_rfq_processor):
     3. Confirm one quote (verify others are auto-disapproved)
     4. Pay all installments (verify auto-completion)
     """
-    logger.info("="*80)
+    logger.info("=" * 80)
     logger.info("COMPLETE WORKFLOW TEST: Auto-Disapproval and Auto-Completion")
-    logger.info("="*80)
+    logger.info("=" * 80)
 
     # Step 1: Create new request
     logger.info("\n[Step 1] Creating new RFQ request...")
@@ -2011,13 +2027,13 @@ def test_complete_workflow_with_auto_disapproval(mcp_rfq_processor):
                 "street": "123 Workflow St",
                 "city": "Test City",
                 "state": "Test State",
-                "zip": "12345"
+                "zip": "12345",
             },
             "shipping_address": {
                 "street": "456 Ship Ave",
                 "city": "Test City",
                 "state": "Test State",
-                "zip": "67890"
+                "zip": "67890",
             },
             "items": [
                 {
@@ -2029,19 +2045,19 @@ def test_complete_workflow_with_auto_disapproval(mcp_rfq_processor):
                             "provider_item_uuid": "76109526415051866240",
                             "provider_corp_external_id": "PROVIDER-001",
                             "batch_no": "BATCH-001",
-                            "qty": 50
+                            "qty": 50,
                         },
                         {
                             "provider_item_uuid": "76109526415051866240",
                             "provider_corp_external_id": "PROVIDER-002",
                             "batch_no": "BATCH-002",
-                            "qty": 50
-                        }
-                    ]
+                            "qty": 50,
+                        },
+                    ],
                 }
-            ]
+            ],
         },
-        "workflow_submit_request"
+        "workflow_submit_request",
     )
 
     assert request_error is None
@@ -2056,9 +2072,9 @@ def test_complete_workflow_with_auto_disapproval(mcp_rfq_processor):
         {
             "request_uuid": request_uuid,
             "provider_corp_external_ids": ["PROVIDER-001", "PROVIDER-002"],
-            "segment_uuid": "99438521399025614976"
+            "segment_uuid": "99438521399025614976",
         },
-        "workflow_confirm_request"
+        "workflow_confirm_request",
     )
 
     assert confirm_error is None
@@ -2069,11 +2085,17 @@ def test_complete_workflow_with_auto_disapproval(mcp_rfq_processor):
     quote1_uuid = quote1["quote_uuid"]
     quote2_uuid = quote2["quote_uuid"]
 
-    logger.info(f"Quote 1: {quote1_uuid} ({quote1['provider_corp_external_id']}) - Status: {quote1['status']}")
-    logger.info(f"Quote 2: {quote2_uuid} ({quote2['provider_corp_external_id']}) - Status: {quote2['status']}")
+    logger.info(
+        f"Quote 1: {quote1_uuid} ({quote1['provider_corp_external_id']}) - Status: {quote1['status']}"
+    )
+    logger.info(
+        f"Quote 2: {quote2_uuid} ({quote2['provider_corp_external_id']}) - Status: {quote2['status']}"
+    )
 
     # Step 3: Confirm first quote and verify second is auto-disapproved
-    logger.info(f"\n[Step 3] Confirming Quote 1, expecting Quote 2 to be auto-disapproved...")
+    logger.info(
+        f"\n[Step 3] Confirming Quote 1, expecting Quote 2 to be auto-disapproved..."
+    )
     confirm_quote_result, confirm_quote_error = _call_method(
         mcp_rfq_processor,
         "confirm_quote_and_create_installments",
@@ -2083,9 +2105,9 @@ def test_complete_workflow_with_auto_disapproval(mcp_rfq_processor):
             "create_single_installment": False,
             "interval_num": 2,
             "total_pay_period": 6,
-            "payment_method": "credit_card"
+            "payment_method": "credit_card",
         },
-        "workflow_confirm_quote"
+        "workflow_confirm_quote",
     )
 
     assert confirm_quote_error is None
@@ -2098,27 +2120,30 @@ def test_complete_workflow_with_auto_disapproval(mcp_rfq_processor):
     quote2_check, quote2_error = _call_method(
         mcp_rfq_processor,
         "get_quote",
-        {
-            "request_uuid": request_uuid,
-            "quote_uuid": quote2_uuid
-        },
-        "workflow_check_quote2"
+        {"request_uuid": request_uuid, "quote_uuid": quote2_uuid},
+        "workflow_check_quote2",
     )
 
     assert quote2_error is None
     logger.info(f"Quote 2 Status: {quote2_check['status']}")
     logger.info(f"Quote 2 Notes: {quote2_check.get('notes', 'No notes')}")
 
-    if quote2_check['status'] == 'disapproved':
+    if quote2_check["status"] == "disapproved":
         logger.info("SUCCESS: Quote 2 was automatically disapproved!")
     else:
-        logger.error(f"FAILED: Quote 2 status is '{quote2_check['status']}', expected 'disapproved'")
+        logger.error(
+            f"FAILED: Quote 2 status is '{quote2_check['status']}', expected 'disapproved'"
+        )
 
-    assert quote2_check['status'] == 'disapproved', "Auto-disapproval failed"
-    assert "Auto-disapproved" in quote2_check.get('notes', ''), "Auto-disapproval note missing"
+    assert quote2_check["status"] == "disapproved", "Auto-disapproval failed"
+    assert "Auto-disapproved" in quote2_check.get(
+        "notes", ""
+    ), "Auto-disapproval note missing"
 
     # Step 4: Pay all installments and verify auto-completion
-    logger.info(f"\n[Step 5] Paying all {len(installments)} installments to trigger auto-completion...")
+    logger.info(
+        f"\n[Step 5] Paying all {len(installments)} installments to trigger auto-completion..."
+    )
 
     for i, installment in enumerate(installments, 1):
         installment_uuid = installment["installment_uuid"]
@@ -2133,9 +2158,9 @@ def test_complete_workflow_with_auto_disapproval(mcp_rfq_processor):
                 "quote_uuid": quote1_uuid,
                 "installment_uuid": installment_uuid,
                 "status": "paid",
-                "salesorder_no": f"SO-WORKFLOW-{i:03d}"
+                "salesorder_no": f"SO-WORKFLOW-{i:03d}",
             },
-            "workflow_pay_installment"
+            "workflow_pay_installment",
         )
 
         assert pay_error is None
@@ -2144,17 +2169,16 @@ def test_complete_workflow_with_auto_disapproval(mcp_rfq_processor):
         # Check status after last payment
         if i == len(installments):
             logger.info(f"\n[Step 6] Verifying auto-completion after final payment...")
-            logger.info("Fetching fresh quote and request data to verify auto-completion...")
+            logger.info(
+                "Fetching fresh quote and request data to verify auto-completion..."
+            )
 
             # Fetch fresh quote data (returned installment has cached data)
             fresh_quote, quote_error = _call_method(
                 mcp_rfq_processor,
                 "get_quote",
-                {
-                    "request_uuid": request_uuid,
-                    "quote_uuid": quote1_uuid
-                },
-                "workflow_verify_quote"
+                {"request_uuid": request_uuid, "quote_uuid": quote1_uuid},
+                "workflow_verify_quote",
             )
 
             assert quote_error is None
@@ -2167,26 +2191,30 @@ def test_complete_workflow_with_auto_disapproval(mcp_rfq_processor):
             if quote_status == "completed":
                 logger.info("SUCCESS: Quote was automatically completed!")
             else:
-                logger.error(f"FAILED: Quote status is '{quote_status}', expected 'completed'")
+                logger.error(
+                    f"FAILED: Quote status is '{quote_status}', expected 'completed'"
+                )
 
             if request_status == "completed":
                 logger.info("SUCCESS: Request was automatically completed!")
             else:
-                logger.error(f"FAILED: Request status is '{request_status}', expected 'completed'")
+                logger.error(
+                    f"FAILED: Request status is '{request_status}', expected 'completed'"
+                )
 
             assert quote_status == "completed", "Quote auto-completion failed"
             assert request_status == "completed", "Request auto-completion failed"
 
-    logger.info("\n" + "="*80)
+    logger.info("\n" + "=" * 80)
     logger.info("COMPLETE WORKFLOW TEST PASSED!")
-    logger.info("="*80)
+    logger.info("=" * 80)
     logger.info(f"Summary:")
     logger.info(f"  - Request UUID: {request_uuid}")
     logger.info(f"  - Quote 1 (Confirmed): {quote1_uuid} - Status: completed")
     logger.info(f"  - Quote 2 (Auto-Disapproved): {quote2_uuid} - Status: disapproved")
     logger.info(f"  - All installments paid")
     logger.info(f"  - Quote and Request auto-completed successfully")
-    logger.info("="*80)
+    logger.info("=" * 80)
 
 
 if __name__ == "__main__":

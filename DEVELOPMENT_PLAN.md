@@ -2,9 +2,9 @@
 
 ## Project Status: ✅ COMPLETED
 
-**Last Updated**: 2025-11-17 (v1.3.0)
+**Last Updated**: 2025-11-20 (v0.1.0)
 
-All planned features have been successfully implemented and are production-ready. This document now serves as a historical record of the development process and architectural decisions.
+All planned features in the current codebase are implemented and production-ready. This document is kept as a snapshot of the architecture and workflow decisions reflected in version 0.1.0.
 
 ## Project Overview
 
@@ -12,11 +12,11 @@ This document outlines the complete development plan for integrating the `ai_rfq
 
 ### Implementation Summary
 
-- **Total MCP Tools**: 26 (implemented)
-- **Module Structure**: Separated into dedicated files (mcp_configuration.py, graphql_client.py, error_handler.py)
-- **Test Coverage**: Comprehensive test suite with 1008 lines
-- **GraphQL Integration**: Fully functional with schema caching
-- **Documentation**: Complete with README, API Reference, and this development plan
+- **Total MCP Tools**: 29 (implemented)
+- **Layered Processors**: Request → Item → Quote → Pricing → Installment → File → Segment processors with shared GraphQL client/error handling
+- **Status & Validation**: Request/Quote/Installment status guards and auto-transition helpers (`status_manager`)
+- **Workflow Helpers**: Convenience methods for confirming requests/quotes and creating quotes/installments in one call
+- **GraphQL Integration**: Schema caching and auto-generation via `graphql_client.py`
 
 ## Status Flow & Business Rules
 
@@ -52,7 +52,7 @@ request (completed)
 - **completed**: Request has been fulfilled with an approved quote
 - **modified**: Request was changed after quote creation (triggers quote disapproval)
 
-**Automatic Status Transitions (v1.3.0):**
+**Automatic Status Transitions:**
 - `modified` → `in_progress`: When items are modified (via add/remove item operations)
 - `confirmed` → `completed`: When at least one quote reaches 'completed' status (auto-completion)
 - User must **explicitly** set status to `modified` to trigger quote disapproval
@@ -62,7 +62,8 @@ request (completed)
 ```
 quote (initial)
     ↓
-    • add quote items (add_quote_item)
+    • quote items created from provider assignments
+    • apply discounts using update_quote_item
     ↓
 quote (in_progress)
     • apply discounts only (update_quote_item - discount modifications only)
@@ -77,19 +78,19 @@ quote (completed) or quote (disapproved)
 ```
 
 **Quote Status Definitions:**
-- **initial**: Quote has been created but not yet being worked on; only `add_quote_item` operations allowed
+- **initial**: Quote has been created; quote items are generated from provider assignments on the request
 - **in_progress**: Quote is being refined; only discount adjustments allowed via `update_quote_item` (no item additions or removals)
 - **confirmed**: Quote has been finalized and is awaiting approval/payment; installments should be created with `pending` status; no item modifications allowed
 - **completed**: Quote has been approved and all payment installments have been marked as `paid`
 - **disapproved**: Quote was rejected or invalidated (e.g., when parent request is modified, or when another quote for the same request is confirmed)
 
-**Automatic Status Transitions (v1.3.0):**
-- `initial` → `in_progress`: When first quote item is added (auto-transition)
+**Automatic Status Transitions:**
+- `initial` → `in_progress`: When quote items are created (auto-transition during quote creation)
 - `confirmed` → `completed`: When all installments are marked as 'paid' (auto-completion, adds note "Auto-completed: All installments paid")
 - `initial/in_progress` → `disapproved`: When another quote for the same request is confirmed (auto-disapproval, adds note "Auto-disapproved: Another quote was confirmed")
   - Only affects competing quotes not already in terminal states (completed, disapproved)
 
-**Validation Rules (v1.3.0):**
+**Validation Rules:**
 - Metadata updates (shipping_method, shipping_amount, notes) only allowed in 'initial' or 'in_progress' status
 - Exception: Status transitions can include notes to document the reason for change
 
@@ -130,12 +131,11 @@ installment (cancelled) [optional]
 
 2. **Quote Item Management**
    - **Status-Based Workflow Restrictions:**
-     - `initial` status: Only allow adding quote items using `add_quote_item`
+     - Quote items are created from request provider assignments during quote creation
      - `in_progress` status: Only allow applying discounts using `update_quote_item` (discount modifications only)
-     - `remove_quote_item` functionality is deprecated and should not be used
+     - To change items, update provider assignments on the request and create a new quote
    - **Operations by Status:**
-     - Initial: `add_quote_item` (add new items to quote)
-     - In Progress: `update_quote_item` (apply discount, adjust discount amount/percent only)
+     - Initial/In Progress: `update_quote_item` (apply discount, adjust discount amount/percent only)
      - Confirmed/Completed: No item modifications allowed
 
 3. **Request Item Management**
@@ -330,8 +330,7 @@ MCP_CONFIGURATION = {
             "inputSchema": {...}
         },
         
-        # Quote Management Tools (8) ✅ IMPLEMENTED
-        # Note: Implementation is MORE flexible than originally planned
+        # Quote Management Tools (5) ✅ IMPLEMENTED
         {
             "name": "create_quote",
             "description": "Create new quote...",
@@ -355,16 +354,6 @@ MCP_CONFIGURATION = {
         {
             "name": "update_quote_item",  # ✅ IMPLEMENTED (more flexible)
             "description": "Update quote item properties...",
-            "inputSchema": {...}
-        },
-        {
-            "name": "add_quote_item",  # ✅ IMPLEMENTED (kept)
-            "description": "Add item to existing quote...",
-            "inputSchema": {...}
-        },
-        {
-            "name": "remove_quote_item",  # ✅ IMPLEMENTED (kept)
-            "description": "Remove item from quote...",
             "inputSchema": {...}
         },
         
@@ -714,14 +703,13 @@ def get_provider_items(self, **arguments: Dict[str, Any]) -> Dict[str, Any]:
 ### 3.3 Quote Management
 **Priority**: Critical (Phase 1)
 **Estimated Time**: 10 hours
-**Status**: ✅ COMPLETED - 8 tools implemented (MORE than planned)
+**Status**: ✅ COMPLETED - 5 tools implemented
 
 **IMPLEMENTATION NOTE**:
-The actual implementation is MORE FLEXIBLE than originally planned:
-1. Quote items CAN be added, updated, and deleted directly using dedicated tools
-2. Quote metadata (shipping, status, notes) CAN be updated
-3. This provides better usability while maintaining proper audit trails
-4. Includes: create_quote, update_quote, get_quote, search_quotes, add_quote_item, update_quote_item, remove_quote_item
+- Quote items are auto-created from provider assignments on the request
+- Quote metadata (shipping, status, notes) can be updated while respecting status guards
+- Discounts are applied via `update_quote_item`; changing items requires updating the request and creating a new quote
+- Includes: create_quote, update_quote, get_quote, search_quotes, update_quote_item
 
 #### Tool: `create_quote`
 ```python
@@ -864,11 +852,10 @@ def update_quote_item_discount(self, **arguments: Dict[str, Any]) -> Dict[str, A
 **Tasks**:
 - [x] Implement create_quote
 - [x] Implement update_quote
-- [x] Implement add_quote_item (kept - provides direct item addition)
-- [x] Implement update_quote_item (kept - provides flexible item updates)
-- [x] Implement remove_quote_item (kept - provides direct item removal)
+- [x] Implement update_quote_item (discount-only updates)
 - [x] Implement get_quote
 - [x] Implement search_quotes
+- [x] Auto-create quote items from request provider assignments
 - [x] Write unit tests for quote management
 
 ---
@@ -1647,12 +1634,8 @@ processor.update_installment(
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
-| 2025-11-05 | 0.1.0 | Initial development plan | Development Team |
-| 2025-11-06 | 0.2.0 | Updated based on business requirements:<br>- Added `update_rfq_request` tool<br>- Removed `add_quote_item`, `update_quote_item`, `delete_quote_item` tools<br>- Added `update_quote` tool (replaces `update_quote_status`)<br>- Added `update_quote_item_discount` tool<br>- Documented new workflows for item modification<br>- Total tools: 22 (was 24) | Development Team |
-| 2025-11-10 | 1.0.0 | **PROJECT COMPLETED**:<br>- All 25 MCP tools fully implemented<br>- Kept flexible quote item operations (add/update/remove)<br>- Added convenience methods for request items<br>- Comprehensive test suite (1008 lines)<br>- Complete documentation (README, API Reference, Dev Plan)<br>- Streamlined segment management (read-only)<br>- Total tools: 25 (focused on RFQ workflow) | Development Team |
-| 2025-11-15 | 1.0.1 | **Documentation Updates**:<br>- Corrected version numbers in README.md<br>- Updated feature descriptions to match v0.1.0<br>- Synchronized documentation across all files<br>- Maintained 25 tools implementation status | Development Team |
-| 2025-11-15 | 1.1.0 | **Status Management Implementation**:<br>- Created `status_manager.py` module (398 lines)<br>- Added status constants: RequestStatus, QuoteStatus, InstallmentStatus<br>- Implemented status transition validation<br>- Added operation guards (prevent invalid operations)<br>- Implemented auto-disapprove quotes on request modification<br>- Implemented auto-complete quote when all installments paid<br>- Updated default status values to match development plan<br>- Exported status management in `__init__.py`<br>- Comprehensive status flow enforcement | Development Team |
-| 2025-11-16 | 1.2.0 | **Workflow Restrictions Update**:<br>- Added status-based quote item management restrictions<br>- Quote initial status: only allow `add_quote_item`<br>- Quote in_progress status: only allow discount updates via `update_quote_item`<br>- Deprecated `remove_quote_item` functionality<br>- Added provider assignment workflow for request items<br>- Updated Quote Status Flow diagram<br>- Updated Quote Status Definitions<br>- Enhanced Critical Business Rules section | Development Team |
+| 2025-11-05 | 0.1.0-plan | Initial development plan drafted | Development Team |
+| 2025-11-20 | 0.1.0 | Modular MCP release with 29 tools, provider assignment helpers, auto-created quote items, workflow convenience functions, and updated documentation | Development Team |
 
 ---
 
@@ -1661,29 +1644,28 @@ processor.update_installment(
 ### ✅ What Was Built
 
 **Core Package:**
-- `MCPRfqProcessor` class with 27 fully implemented methods
-- GraphQL integration with schema caching
-- Comprehensive error handling and logging
-- AWS Lambda client initialization
+- `MCPRfqProcessor` class with 29 implemented tools exposed in `mcp_configuration.py`
+- Layered processors (Request → Item → Quote → Pricing → Installment → File → Segment) sharing GraphQL execution, error handling, and status guards
+- GraphQL integration with schema caching and AWS Lambda execution support
 
-**MCP Tools (27 total):**
-1. Request Management (6): submit, update, add_item, remove_item, get, search
+**MCP Tools (29 total):**
+1. Request Management (8): submit, update, add_item, remove_item, assign_provider_item, remove_provider_item, get, search
 2. Item & Inventory (4): search_items, get_item, get_provider_items, get_provider_item_batches
-3. Quote Management (8): create, update, add_item, update_item, remove_item, get, search, calculate_pricing
-4. Pricing (3): get_price_tiers, get_discount_rules, calculate_pricing
-5. Installments (2): create, get
-6. Files (2): upload, get
-7. Segments (1): get_contacts (read-only)
+3. Quote Management (5): create, update, update_quote_item, get, search
+4. Pricing (3): get_price_tiers, get_discount_rules, calculate_quote_pricing
+5. Installments (4): create_installment, update_installment, create_installments, get_installments
+6. Workflow Convenience (2): confirm_request_and_create_quotes, confirm_quote_and_create_installments
+7. Files (2): upload, get
+8. Segments (1): get_contacts (read-only)
 
 **Testing:**
-- 1008 lines of comprehensive unit tests
-- Coverage for all 25 tools
+- Pytest suite covering status transitions, pricing calculations, and workflow helpers
 - Mock strategies for GraphQL integration
 
 **Documentation:**
-- README.md: Complete user guide with examples
+- README.md: User guide with workflows and examples
 - API_REFERENCE.md: GraphQL mappings and type definitions
-- DEVELOPMENT_PLAN.md: Historical record with completion status
+- DEVELOPMENT_PLAN.md: Architectural snapshot and history
 
 ### 🎯 Key Achievements
 

@@ -4,8 +4,8 @@
 
 This document provides a comprehensive reference for the GraphQL API operations used by the MCP RFQ Processor, including all queries, mutations, and type definitions from the `ai_rfq_engine` GraphQL backend.
 
-**Version**: 1.2.0
-**Total MCP Tools**: 26 (all implemented)
+**Version**: 0.1.0
+**Total MCP Tools**: 29 (all implemented)
 **GraphQL Endpoint**: ai_rfq_graphql (AWS Lambda)
 
 ## Table of Contents
@@ -738,7 +738,7 @@ type Segment {
 
 ## MCP Tool to GraphQL Mapping
 
-**Total MCP Tools**: 27 (all implemented)
+**Total MCP Tools**: 29 (all implemented)
 
 | # | MCP Tool | GraphQL Operation | Type | Category | Notes |
 |---|----------|-------------------|------|----------|-------|
@@ -746,19 +746,19 @@ type Segment {
 | 2 | update_rfq_request | insertUpdateRequest | Mutation | Request | Update existing request |
 | 3 | add_item_to_rfq_request | insertUpdateRequest | Mutation | Request | Convenience: add single item |
 | 4 | remove_item_from_rfq_request | insertUpdateRequest | Mutation | Request | Convenience: remove single item |
-| 5 | get_rfq_request | request | Query | Request | Retrieve single request |
-| 6 | search_rfq_requests | requestList | Query | Request | Search with filters |
-| 7 | search_items | itemList | Query | Item | Search catalog |
-| 8 | get_item | item | Query | Item | Get item details |
-| 9 | get_provider_items | providerItemList | Query | Item | Search inventory |
-| 10 | get_provider_item_batches | providerItemBatchList | Query | Item | Get batch info |
-| 11 | create_quote | insertUpdateQuote | Mutation | Quote | Create new quote |
-| 12 | update_quote | insertUpdateQuote | Mutation | Quote | Update quote metadata |
-| 13 | add_quote_item | insertUpdateQuoteItem | Mutation | Quote | Add item to quote (initial status only) |
-| 14 | update_quote_item | insertUpdateQuoteItem | Mutation | Quote | Update quote item (in_progress status only, discount modifications) |
-| 15 | remove_quote_item | deleteQuoteItem | Mutation | Quote | **DEPRECATED** - Do not use |
-| 16 | get_quote | quote | Query | Quote | Retrieve quote |
-| 17 | search_quotes | quoteList | Query | Quote | Search quotes |
+| 5 | assign_provider_item_to_request_item | providerItem + insertUpdateRequest | Composite | Request | Validate provider item, then attach to request item |
+| 6 | remove_provider_item_from_request_item | insertUpdateRequest | Mutation | Request | Remove provider assignments |
+| 7 | get_rfq_request | request | Query | Request | Retrieve single request |
+| 8 | search_rfq_requests | requestList | Query | Request | Search with filters |
+| 9 | search_items | itemList | Query | Item | Search catalog |
+| 10 | get_item | item | Query | Item | Get item details |
+| 11 | get_provider_items | providerItemList | Query | Item | Search inventory with batches |
+| 12 | get_provider_item_batches | providerItemBatchList | Query | Item | Get batch info |
+| 13 | create_quote | insertUpdateQuote (+ insertUpdateQuoteItem) | Mutation | Quote | Creates quote and quote items from provider assignments |
+| 14 | update_quote | insertUpdateQuote | Mutation | Quote | Update quote metadata/status |
+| 15 | get_quote | quote | Query | Quote | Retrieve quote |
+| 16 | search_quotes | quoteList | Query | Quote | Search quotes |
+| 17 | update_quote_item | insertUpdateQuoteItem | Mutation | Quote | Update quote item discount |
 | 18 | get_item_price_tiers | itemPriceTierList | Query | Pricing | Get tiered pricing (with qty filters) |
 | 19 | get_discount_rules | discountRuleList | Query | Pricing | Get discount rules (with subtotal filters) |
 | 20 | calculate_quote_pricing | Multiple Queries | Business Logic | Pricing | Groups request items, returns pricing + rules |
@@ -766,9 +766,11 @@ type Segment {
 | 22 | update_installment | insertUpdateInstallment | Mutation | Installment | Update installment status/SO |
 | 23 | create_installments | insertUpdateInstallment | Mutation | Installment | Create multiple installments |
 | 24 | get_installments | installmentList | Query | Installment | Get installment schedule |
-| 25 | upload_rfq_file | insertUpdateFile | Mutation | File | Upload document |
-| 26 | get_rfq_files | fileList | Query | File | Get files |
-| 27 | get_segment_contacts | segmentContactList | Query | Segment | List contacts (read-only) |
+| 25 | confirm_request_and_create_quotes | insertUpdateRequest + insertUpdateQuote | Composite | Workflow | Confirm request and create provider quotes |
+| 26 | confirm_quote_and_create_installments | insertUpdateQuote + insertUpdateInstallment | Composite | Workflow | Confirm quote, disapprove others, create installments |
+| 27 | upload_rfq_file | insertUpdateFile | Mutation | File | Upload document |
+| 28 | get_rfq_files | fileList | Query | File | Get files |
+| 29 | get_segment_contacts | segmentContactList | Query | Segment | List contacts (read-only) |
 
 ---
 
@@ -1110,11 +1112,7 @@ mutation {
 
 ## Notes
 
-1. **Status-Based Quote Item Management** (v1.2.0): Quote item operations are restricted by quote status:
-   - **initial status**: Only `add_quote_item` allowed to add new items
-   - **in_progress status**: Only `update_quote_item` allowed for discount modifications
-   - **remove_quote_item**: Deprecated and should not be used
-   - To change quote items after creation, modify the request and create a new quote
+1. **Status-Based Quote Item Management**: Quote items are created automatically from provider assignments when a quote is created. Item changes are limited to discount updates via `update_quote_item` while the quote is `initial` or `in_progress`. To change items or providers, update the request assignments and create a new quote.
 
 2. **Request Item Convenience Methods**: Use `add_item_to_rfq_request` and `remove_item_from_rfq_request` for convenient single-item operations on requests.
 

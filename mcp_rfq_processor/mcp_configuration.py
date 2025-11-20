@@ -68,7 +68,7 @@ MCP_CONFIGURATION = {
                     },
                     "contact_uuid": {
                         "type": "string",
-                        "description": "Updated contact email address",
+                        "description": "Updated contact email address (passed through to GraphQL email field)",
                     },
                     "request_title": {
                         "type": "string",
@@ -545,7 +545,7 @@ MCP_CONFIGURATION = {
         },
         {
             "name": "update_quote_item",
-            "description": "Update quote item including quantity, discount, and other properties. Returns updated item totals with slow_move_item flag (indicates slow-moving inventory) and guardrail_price_per_uom (minimum acceptable price for profitability).",
+            "description": "Update quote item discount only. Returns updated item totals with slow_move_item flag (indicates slow-moving inventory) and guardrail_price_per_uom (minimum acceptable price for profitability).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -557,40 +557,16 @@ MCP_CONFIGURATION = {
                         "type": "string",
                         "description": "UUID of the quote item to update",
                     },
-                    "provider_item_uuid": {
-                        "type": "string",
-                        "description": "UUID of the provider item",
-                    },
-                    "item_uuid": {
-                        "type": "string",
-                        "description": "UUID of the item",
-                    },
-                    "segment_uuid": {
-                        "type": "string",
-                        "description": "UUID of the segment",
-                    },
-                    "batch_no": {
-                        "type": "string",
-                        "description": "Batch number",
-                    },
                     "request_uuid": {
                         "type": "string",
                         "description": "UUID of the request",
-                    },
-                    "request_data": {
-                        "type": "object",
-                        "description": "Request data (JSON object)",
-                    },
-                    "qty": {
-                        "type": "integer",
-                        "description": "Quantity",
                     },
                     "discount_amount": {
                         "type": "number",
                         "description": "Discount amount (subtotal discount)",
                     },
                 },
-                "required": ["quote_uuid"],
+                "required": ["quote_uuid", "quote_item_uuid"],
             },
         },
         # Pricing Tools (3)
@@ -633,6 +609,7 @@ MCP_CONFIGURATION = {
                         "description": "Filter tiers where price_per_uom is at most this value",
                     },
                 },
+                "required": ["item_uuid", "provider_item_uuid", "segment_uuid"],
             },
         },
         {
@@ -674,6 +651,7 @@ MCP_CONFIGURATION = {
                         "description": "Filter rules where max_discount_percentage is at least this value",
                     },
                 },
+                "required": ["item_uuid", "provider_item_uuid", "segment_uuid"],
             },
         },
         {
@@ -723,7 +701,7 @@ MCP_CONFIGURATION = {
                         "enum": ["pending", "paid", "cancelled"],
                     },
                 },
-                "required": ["quote_uuid", "request_uuid", "payment_method"],
+                "required": ["quote_uuid", "request_uuid"],
             },
         },
         {
@@ -789,7 +767,6 @@ MCP_CONFIGURATION = {
                     "request_uuid",
                     "interval_num",
                     "total_pay_period",
-                    "payment_method",
                 ],
             },
         },
