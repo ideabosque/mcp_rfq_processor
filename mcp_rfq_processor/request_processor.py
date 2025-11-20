@@ -17,6 +17,7 @@ from .error_handler import (
     propagate_error_if_present,
     validate_not_empty,
 )
+from .graphql_backed_processor import GraphQLBackedProcessor
 
 # Import status management
 from .status_manager import (
@@ -28,7 +29,6 @@ from .status_manager import (
     should_request_be_in_progress,
 )
 
-from .graphql_backed_processor import GraphQLBackedProcessor
 
 class RequestProcessor(GraphQLBackedProcessor):
     def _disapprove_all_quotes_for_request(self, request_uuid: str) -> None:

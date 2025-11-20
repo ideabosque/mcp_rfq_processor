@@ -16,6 +16,7 @@ from .error_handler import (
     handle_errors,
     propagate_error_if_present,
 )
+from .pricing_processor import PricingProcessor
 
 # Import status management
 from .status_manager import (
@@ -28,7 +29,6 @@ from .status_manager import (
     should_request_be_completed,
 )
 
-from .pricing_processor import PricingProcessor
 
 class InstallmentProcessor(PricingProcessor):
     # ==================== Installment Tools ====================
@@ -383,6 +383,10 @@ class InstallmentProcessor(PricingProcessor):
 
         if error := propagate_error_if_present(quote_result):
             return error
+
+        # Validate that quote status allows installment creation (must be confirmed)
+        current_status = quote_result.get("status", "")
+        QuoteOperationGuard.validate_can_create_installment(current_status)
 
         # Get the quote amount
         final_total_quote_amount = quote_result.get("final_total_quote_amount")
