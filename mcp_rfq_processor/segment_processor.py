@@ -9,14 +9,11 @@ from typing import Any, Dict
 import humps
 
 # Import centralized error handling utilities
-from .error_handler import (
-    handle_errors,
-    propagate_error_if_present,
-)
+from .error_handler import handle_errors, propagate_error_if_present
+from .file_processor import FileProcessor
 
 # Import status management
 
-from .file_processor import FileProcessor
 
 class SegmentProcessor(FileProcessor):
     # ==================== Segment Tools ====================
@@ -31,7 +28,9 @@ class SegmentProcessor(FileProcessor):
         variables = {
             "pageNumber": arguments.get("page_number", 1),
             "limit": arguments.get("limit", 50),
-            "consumerCorpExternalId": arguments.get("consumer_corp_external_id"),
+            "consumerCorpExternalId": arguments.get(
+                "consumer_corp_external_id", "XXXXXXXXXXXXXXXXXXXX"
+            ),
             "email": arguments.get("email"),
         }
 

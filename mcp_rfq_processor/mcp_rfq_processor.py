@@ -11,6 +11,7 @@ from .file_processor import FileProcessor
 from .graphql_backed_processor import GraphQLBackedProcessor
 from .installment_processor import InstallmentProcessor
 from .item_processor import ItemProcessor
+from .mcp_configuration import MCP_CONFIGURATION
 from .pricing_processor import PricingProcessor
 from .quote_processor import QuoteProcessor
 from .request_processor import RequestProcessor
@@ -26,6 +27,7 @@ __all__ = [
     "FileProcessor",
     "SegmentProcessor",
     "MCPRfqProcessor",
+    "MCP_CONFIGURATION",
 ]
 
 
