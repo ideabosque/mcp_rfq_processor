@@ -927,9 +927,10 @@ MCP_CONFIGURATION = {
                     },
                     "email": {
                         "type": "string",
-                        "description": "Filter by contact email address",
+                        "description": "Contact email address (required)",
                     },
                 },
+                "required": ["email"],
             },
         },
     ],

@@ -25,13 +25,24 @@ class SegmentProcessor(FileProcessor):
         List segment contacts.
         Maps to GraphQL: segmentContactList query
         """
+        # Email is required
+        email = arguments.get("email")
+        if not email:
+            return {
+                "error": {
+                    "message": "Email is required for get_segment_contacts",
+                    "error_code": "MISSING_REQUIRED_FIELD",
+                    "details": {"field": "email"},
+                }
+            }
+
         variables = {
             "pageNumber": arguments.get("page_number", 1),
             "limit": arguments.get("limit", 50),
             "consumerCorpExternalId": arguments.get(
                 "consumer_corp_external_id", "XXXXXXXXXXXXXXXXXXXX"
             ),
-            "email": arguments.get("email"),
+            "email": email,
         }
 
         variables = {k: v for k, v in variables.items() if v is not None}
