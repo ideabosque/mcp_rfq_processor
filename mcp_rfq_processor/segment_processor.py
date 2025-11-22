@@ -36,12 +36,14 @@ class SegmentProcessor(FileProcessor):
                 }
             }
 
+        consumer_corp_external_id = arguments.get("consumer_corp_external_id")
+        if not consumer_corp_external_id or consumer_corp_external_id == "":
+            consumer_corp_external_id = "XXXXXXXXXXXXXXXXXXXX"
+
         variables = {
             "pageNumber": arguments.get("page_number", 1),
             "limit": arguments.get("limit", 50),
-            "consumerCorpExternalId": arguments.get(
-                "consumer_corp_external_id", "XXXXXXXXXXXXXXXXXXXX"
-            ),
+            "consumerCorpExternalId": consumer_corp_external_id,
             "email": email,
         }
 

@@ -72,9 +72,8 @@ sys.path.insert(0, os.path.join(base_dir, "silvaengine_dynamodb_base"))
 sys.path.insert(0, os.path.join(base_dir, "mcp_rfq_processor"))
 sys.path.insert(0, os.path.join(base_dir, "ai_rfq_engine"))
 
-from silvaengine_utility import Utility
-
 from mcp_rfq_processor.mcp_rfq_processor import MCPRfqProcessor
+from silvaengine_utility import Utility
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -582,17 +581,40 @@ def test_get_segment_contacts(mcp_rfq_processor, test_data):
 @pytest.mark.parametrize("test_data", ITEM_LIST_TEST_DATA)
 @log_test_result
 def test_search_items(mcp_rfq_processor, test_data):
-    """Test searching items."""
+    """Test searching items with various filters."""
+    # Build arguments from test data
+    arguments = {}
+
+    if test_data.get("itemType"):
+        arguments["item_type"] = test_data.get("itemType")
+    if test_data.get("itemName"):
+        arguments["item_name"] = test_data.get("itemName")
+    if test_data.get("uoms"):
+        arguments["uoms"] = test_data.get("uoms")
+    if test_data.get("limit"):
+        arguments["limit"] = test_data.get("limit")
+    if test_data.get("pageNumber"):
+        arguments["page_number"] = test_data.get("pageNumber")
+
     result, error = _call_method(
         mcp_rfq_processor,
         "search_items",
-        {"item_type": test_data.get("itemType")},
+        arguments,
         "search_items",
     )
 
     assert error is None
     assert result is not None
     assert "total" in result
+
+    # Verify response structure
+    if "item_list" in result or "itemList" in result:
+        items = result.get("item_list") or result.get("itemList")
+        if items and len(items) > 0:
+            # Check that first item has expected fields
+            item = items[0]
+            assert "item_uuid" in item or "itemUuid" in item
+            logger.info(f"Found {len(items)} item(s) with filters: {arguments}")
 
 
 @pytest.mark.integration
