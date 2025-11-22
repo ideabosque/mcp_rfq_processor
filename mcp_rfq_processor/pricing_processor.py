@@ -16,8 +16,8 @@ from .error_handler import (
 )
 
 # Import status management
-
 from .quote_processor import QuoteProcessor
+
 
 class PricingProcessor(QuoteProcessor):
     # ==================== Pricing Tools ====================
@@ -46,7 +46,7 @@ class PricingProcessor(QuoteProcessor):
             "status": "active",
         }
 
-        variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None and v != ""}
 
         result = self._execute_graphql_query(
             "ai_rfq_graphql",
@@ -108,7 +108,7 @@ class PricingProcessor(QuoteProcessor):
             "status": "active",
         }
 
-        variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None and v != ""}
 
         result = self._execute_graphql_query(
             "ai_rfq_graphql",

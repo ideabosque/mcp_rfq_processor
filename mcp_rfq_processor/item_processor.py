@@ -9,14 +9,11 @@ from typing import Any, Dict
 import humps
 
 # Import centralized error handling utilities
-from .error_handler import (
-    handle_errors,
-    propagate_error_if_present,
-)
+from .error_handler import handle_errors, propagate_error_if_present
 
 # Import status management
-
 from .request_processor import RequestProcessor
+
 
 class ItemProcessor(RequestProcessor):
     # ==================== Item Management Tools ====================
@@ -36,7 +33,7 @@ class ItemProcessor(RequestProcessor):
             "uoms": arguments.get("uoms"),
         }
 
-        variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None and v != ""}
 
         result = self._execute_graphql_query(
             "ai_rfq_graphql",
@@ -84,22 +81,18 @@ class ItemProcessor(RequestProcessor):
 
         Optional batch filters (applied when fetching batches):
         - expired_at_gt: Filter batches expiring after this date
-        - expired_at_lt: Filter batches expiring before this date
         - slow_move_item: Filter for slow-moving inventory (default: False)
         - in_stock: Filter for in-stock batches (default: True)
 
-        Note: If no expiration filters provided, defaults to batches expiring 90+ days from now.
+        Note: If expired_at_gt not provided, defaults to batches expiring 90+ days from now.
         """
         variables = {
             "pageNumber": arguments.get("page_number", 1),
             "limit": arguments.get("limit", 50),
-            "itemUuid": arguments.get("item_uuid"),
-            "providerCorpExternalId": arguments.get("provider_corp_external_id"),
-            "minBasePricePerUom": arguments.get("min_base_price_per_uom"),
-            "maxBasePricePerUom": arguments.get("max_base_price_per_uom"),
+            "itemUuid": arguments["item_uuid"],
         }
 
-        variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None and v != ""}
 
         result = self._execute_graphql_query(
             "ai_rfq_graphql",
@@ -117,7 +110,6 @@ class ItemProcessor(RequestProcessor):
 
         # Extract batch filter parameters from arguments (optional)
         batch_expired_at_gt = arguments.get("expired_at_gt")
-        batch_expired_at_lt = arguments.get("expired_at_lt")
         batch_slow_move_item = arguments.get("slow_move_item", False)
         batch_in_stock = arguments.get("in_stock", True)
 
@@ -130,7 +122,6 @@ class ItemProcessor(RequestProcessor):
                 batch_arguments = {
                     "provider_item_uuid": provider_item_uuid,
                     "expired_at_gt": batch_expired_at_gt,
-                    "expired_at_lt": batch_expired_at_lt,
                     "slow_move_item": batch_slow_move_item,
                     "in_stock": batch_in_stock,
                     "limit": 100,  # Get all batches for this item
@@ -162,16 +153,15 @@ class ItemProcessor(RequestProcessor):
         - guardrail_price_per_uom: Minimum acceptable price for profitability
         - Batch details: expired_at, produced_at, cost breakdown
 
-        Note: If neither expired_at_gt nor expired_at_lt is provided, defaults to
-        filtering batches expiring 90+ days from now.
+        Note: If expired_at_gt is not provided, defaults to filtering batches
+        expiring 90+ days from now.
         """
         from datetime import datetime, timedelta, timezone
 
-        # Set default expired_at_gt based on configured days if no expiration filters provided
+        # Set default expired_at_gt based on configured days if not provided
         expired_at_gt = arguments.get("expired_at_gt")
-        expired_at_lt = arguments.get("expired_at_lt")
 
-        if not expired_at_gt and not expired_at_lt:
+        if not expired_at_gt:
             # Get default expiration filter days from settings (default: 90 days / ~3 months)
             default_expiration_days = self.setting.get(
                 "default_batch_expiration_filter_days", 90
@@ -187,12 +177,11 @@ class ItemProcessor(RequestProcessor):
             "providerItemUuid": arguments.get("provider_item_uuid"),
             "itemUuid": arguments.get("item_uuid"),
             "expiredAtGt": expired_at_gt,
-            "expiredAtLt": expired_at_lt,
             "slowMoveItem": arguments.get("slow_move_item", False),
             "inStock": arguments.get("in_stock", True),
         }
 
-        variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None and v != ""}
 
         result = self._execute_graphql_query(
             "ai_rfq_graphql",

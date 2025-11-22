@@ -120,7 +120,7 @@ class RequestProcessor(GraphQLBackedProcessor):
         }
 
         # Remove None values
-        variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None and v != ""}
 
         result = self._execute_graphql_query(
             "ai_rfq_graphql",
@@ -184,7 +184,7 @@ class RequestProcessor(GraphQLBackedProcessor):
         }
 
         # Remove None values to only update provided fields
-        variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None and v != ""}
 
         result = self._execute_graphql_query(
             "ai_rfq_graphql",
@@ -248,7 +248,7 @@ class RequestProcessor(GraphQLBackedProcessor):
         }
 
         # Remove None values
-        variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None and v != ""}
 
         result = self._execute_graphql_query(
             "ai_rfq_graphql",
@@ -318,6 +318,7 @@ class RequestProcessor(GraphQLBackedProcessor):
 
         # If item doesn't exist, add it as new
         if not item_found:
+            new_item["provider_items"] = []
             current_items.append(new_item)
             self.logger.info(f"Added new item to request")
 

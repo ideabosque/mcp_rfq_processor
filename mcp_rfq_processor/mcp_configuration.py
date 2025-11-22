@@ -174,7 +174,22 @@ MCP_CONFIGURATION = {
                     },
                     "item": {
                         "type": "object",
-                        "description": "Item object to add (JSON object with item details such as item_uuid, quantity, etc.)",
+                        "description": "Item object to add with item_uuid, item_name, and qty",
+                        "properties": {
+                            "item_uuid": {
+                                "type": "string",
+                                "description": "UUID of the item",
+                            },
+                            "item_name": {
+                                "type": "string",
+                                "description": "Name of the item",
+                            },
+                            "qty": {
+                                "type": "integer",
+                                "description": "Quantity of the item",
+                            },
+                        },
+                        "required": ["item_uuid", "item_name", "qty"],
                     },
                 },
                 "required": ["request_uuid", "item"],
@@ -318,7 +333,7 @@ MCP_CONFIGURATION = {
         },
         {
             "name": "get_provider_items",
-            "description": "Search provider inventory with batch information merged. For each provider item, fetches and merges batch information including slow_move_item flags and guardrail pricing. Each batch includes: batch_no, expired_at, produced_at, slow_move_item, guardrail_price_per_uom. Optional batch filters can be applied when fetching batches. If no expiration filters provided, defaults to batches expiring 90+ days from now.",
+            "description": "Search provider inventory with batch information merged. For each provider item, fetches and merges batch information including slow_move_item flags and guardrail pricing. Each batch includes: batch_no, expired_at, produced_at, slow_move_item, guardrail_price_per_uom. Optional batch filters can be applied when fetching batches. If expired_at_gt not provided, defaults to batches expiring 90+ days from now.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -334,25 +349,9 @@ MCP_CONFIGURATION = {
                         "type": "string",
                         "description": "Filter by item UUID",
                     },
-                    "provider_corp_external_id": {
-                        "type": "string",
-                        "description": "Filter by provider ID",
-                    },
-                    "min_base_price_per_uom": {
-                        "type": "number",
-                        "description": "Minimum price filter",
-                    },
-                    "max_base_price_per_uom": {
-                        "type": "number",
-                        "description": "Maximum price filter",
-                    },
                     "expired_at_gt": {
                         "type": "string",
                         "description": "Filter batches expiring after this date (ISO 8601 format)",
-                    },
-                    "expired_at_lt": {
-                        "type": "string",
-                        "description": "Filter batches expiring before this date (ISO 8601 format)",
                     },
                     "slow_move_item": {
                         "type": "boolean",
@@ -363,47 +362,7 @@ MCP_CONFIGURATION = {
                         "description": "Filter for in-stock batches (default: true)",
                     },
                 },
-            },
-        },
-        {
-            "name": "get_provider_item_batches",
-            "description": "Get batch/lot information for provider items including slow_move_item flag and guardrail pricing. Useful for tracking inventory batches, lot numbers, and identifying slow-moving inventory that may need special pricing. If neither expired_at_gt nor expired_at_lt is provided, defaults to filtering batches expiring 3+ months from now.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "page_number": {
-                        "type": "integer",
-                        "description": "Page number (default: 1)",
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Results per page (default: 50)",
-                    },
-                    "provider_item_uuid": {
-                        "type": "string",
-                        "description": "Filter by provider item UUID",
-                    },
-                    "item_uuid": {
-                        "type": "string",
-                        "description": "Filter by item UUID",
-                    },
-                    "expired_at_gt": {
-                        "type": "string",
-                        "description": "Filter batches with expiration date greater than this ISO 8601 datetime",
-                    },
-                    "expired_at_lt": {
-                        "type": "string",
-                        "description": "Filter batches with expiration date less than this ISO 8601 datetime",
-                    },
-                    "slow_move_item": {
-                        "type": "boolean",
-                        "description": "Filter by slow-moving inventory flag (default: false)",
-                    },
-                    "in_stock": {
-                        "type": "boolean",
-                        "description": "Filter by in-stock status (default: true)",
-                    },
-                },
+                "required": ["item_uuid"],
             },
         },
         # Quote Management Tools (3)
@@ -1023,14 +982,6 @@ MCP_CONFIGURATION = {
             "module_name": "mcp_rfq_processor",
             "class_name": "MCPRfqProcessor",
             "function_name": "get_provider_items",
-            "return_type": "text",
-        },
-        {
-            "type": "tool",
-            "name": "get_provider_item_batches",
-            "module_name": "mcp_rfq_processor",
-            "class_name": "MCPRfqProcessor",
-            "function_name": "_get_provider_item_batches",
             "return_type": "text",
         },
         # Quote Management Tools

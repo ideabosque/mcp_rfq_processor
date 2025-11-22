@@ -13,6 +13,7 @@ from .error_handler import (
     handle_errors,
     propagate_error_if_present,
 )
+from .item_processor import ItemProcessor
 
 # Import status management
 from .status_manager import (
@@ -22,7 +23,6 @@ from .status_manager import (
     RequestOperationGuard,
 )
 
-from .item_processor import ItemProcessor
 
 class QuoteProcessor(ItemProcessor):
     # ==================== Quote Management Tools ====================
@@ -67,7 +67,7 @@ class QuoteProcessor(ItemProcessor):
 
         # Remove None values to only send provided fields
         # Note: 'rounds' is auto-calculated, shipping_method/shipping_amount not allowed on creation
-        variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None and v != ""}
 
         result = self._execute_graphql_query(
             "ai_rfq_graphql",
@@ -206,7 +206,7 @@ class QuoteProcessor(ItemProcessor):
 
         # Remove None values to only update provided fields
         # Note: 'rounds' is auto-calculated by backend, not sent in updates
-        variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None and v != ""}
 
         result = self._execute_graphql_query(
             "ai_rfq_graphql",
@@ -263,7 +263,7 @@ class QuoteProcessor(ItemProcessor):
         }
 
         # Remove None values
-        variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None and v != ""}
 
         result = self._execute_graphql_query(
             "ai_rfq_graphql",
@@ -339,7 +339,7 @@ class QuoteProcessor(ItemProcessor):
         }
 
         # Remove None values (but keep "default" for segment_uuid)
-        variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None and v != ""}
 
         result = self._execute_graphql_query(
             "ai_rfq_graphql",
@@ -424,7 +424,7 @@ class QuoteProcessor(ItemProcessor):
             "toCreatedAt": arguments.get("to_created_at"),
         }
 
-        variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None and v != ""}
 
         result = self._execute_graphql_query(
             "ai_rfq_graphql",

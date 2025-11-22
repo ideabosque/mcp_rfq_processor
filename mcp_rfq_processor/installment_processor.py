@@ -555,7 +555,7 @@ class InstallmentProcessor(PricingProcessor):
             "statuses": arguments.get("statuses"),
         }
 
-        variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None and v != ""}
 
         result = self._execute_graphql_query(
             "ai_rfq_graphql",

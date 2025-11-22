@@ -15,8 +15,8 @@ from .error_handler import (
 )
 
 # Import status management
-
 from .installment_processor import InstallmentProcessor
+
 
 class FileProcessor(InstallmentProcessor):
     # ==================== File Tools ====================
@@ -66,7 +66,7 @@ class FileProcessor(InstallmentProcessor):
             "fileType": arguments.get("file_type"),
         }
 
-        variables = {k: v for k, v in variables.items() if v is not None}
+        variables = {k: v for k, v in variables.items() if v is not None and v != ""}
 
         result = self._execute_graphql_query(
             "ai_rfq_graphql",
