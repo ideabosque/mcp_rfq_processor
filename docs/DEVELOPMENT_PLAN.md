@@ -172,6 +172,283 @@ installment (cancelled) [optional]
   - Installments (payment schedules)
   - Files (document attachments)
 
+## System Diagrams
+
+### Sequence Diagram: Complete RFQ to Quote Workflow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant MCP as MCP RFQ Processor
+    participant GraphQL as ai_rfq_graphql API
+    participant DB as Database
+
+    Note over User,DB: Step 1: Submit RFQ Request
+    User->>MCP: submit_rfq_request(contact_uuid, title, items)
+    MCP->>GraphQL: insertUpdateRequest mutation
+    GraphQL->>DB: Create Request (status: initial)
+    DB-->>GraphQL: request_uuid
+    GraphQL-->>MCP: Request created
+    MCP-->>User: request_uuid, status: initial
+
+    Note over User,DB: Step 2: Search Items
+    User->>MCP: search_items(item_name)
+    MCP->>GraphQL: itemList query
+    GraphQL->>DB: Query items
+    DB-->>GraphQL: Item catalog
+    GraphQL-->>MCP: Items list
+    MCP-->>User: Available items
+
+    Note over User,DB: Step 3: Add Items to Request
+    User->>MCP: add_item_to_rfq_request(request_uuid, item)
+    MCP->>GraphQL: insertUpdateRequest mutation
+    GraphQL->>DB: Update Request (status: in_progress)
+    DB-->>GraphQL: Updated request
+    GraphQL-->>MCP: Item added
+    MCP-->>User: Request updated
+
+    Note over User,DB: Step 4: Lookup Provider Items
+    User->>MCP: get_provider_items(item_uuid)
+    MCP->>GraphQL: providerItemList query
+    GraphQL->>DB: Query provider inventory
+    DB-->>GraphQL: Provider items
+    GraphQL-->>MCP: Provider items list
+    MCP-->>User: Available providers
+
+    Note over User,DB: Step 5: Assign Provider Items
+    User->>MCP: assign_provider_item_to_request_item(...)
+    MCP->>GraphQL: insertUpdateRequestItem mutation
+    GraphQL->>DB: Assign provider to item
+    DB-->>GraphQL: Updated item
+    GraphQL-->>MCP: Provider assigned
+    MCP-->>User: Assignment confirmed
+
+    Note over User,DB: Step 6: Calculate Pricing
+    User->>MCP: calculate_quote_pricing(request_uuid, segment_uuid)
+    MCP->>GraphQL: providerItemList query (get base prices)
+    GraphQL->>DB: Query provider items
+    DB-->>GraphQL: Provider item prices
+    GraphQL-->>MCP: Base prices
+    MCP->>GraphQL: itemPriceTierList query
+    GraphQL->>DB: Query price tiers
+    DB-->>GraphQL: Tiered pricing rules
+    GraphQL-->>MCP: Price tier data
+    MCP->>GraphQL: discountRuleList query
+    GraphQL->>DB: Query discount rules
+    DB-->>GraphQL: Applicable discounts
+    GraphQL-->>MCP: Discount rules
+    MCP->>MCP: Calculate grouped pricing by provider
+    MCP-->>User: Pricing options (base, tiers, discounts) by provider
+
+    Note over User,DB: Step 7: Confirm Request
+    User->>MCP: update_rfq_request(status: confirmed)
+    MCP->>GraphQL: insertUpdateRequest mutation
+    GraphQL->>DB: Update status
+    DB-->>GraphQL: Request confirmed
+    GraphQL-->>MCP: Status updated
+    MCP-->>User: Request confirmed
+
+    Note over User,DB: Step 8: Create Quote
+    User->>MCP: create_quote(request_uuid, provider_id)
+    MCP->>GraphQL: insertUpdateQuote mutation
+    GraphQL->>DB: Create quote & auto-create quote items
+    DB-->>GraphQL: quote_uuid
+    GraphQL-->>MCP: Quote created
+    MCP-->>User: quote_uuid, status: in_progress
+
+    Note over User,DB: Step 9: Negotiate Pricing
+    User->>MCP: get_item_price_tiers(item_uuid, provider_item_uuid)
+    MCP->>GraphQL: itemPriceTierList query
+    GraphQL->>DB: Query specific price tiers
+    DB-->>GraphQL: Price tier options
+    GraphQL-->>MCP: Tier details
+    MCP-->>User: "Order 200 units for $45/unit instead of $50/unit"
+
+    User->>MCP: get_discount_rules(segment_uuid)
+    MCP->>GraphQL: discountRuleList query
+    GraphQL->>DB: Query segment discounts
+    DB-->>GraphQL: Available discounts
+    GraphQL-->>MCP: Discount options
+    MCP-->>User: "Subtotal qualifies for 10% group discount"
+
+    Note over User,MCP: User confirms pricing and discounts
+
+    Note over User,DB: Step 10: Apply Discounts
+    User->>MCP: update_quote_item(quote_item_uuid, discount)
+    MCP->>GraphQL: insertUpdateQuoteItem mutation
+    GraphQL->>DB: Update discount
+    DB-->>GraphQL: Updated quote item
+    GraphQL-->>MCP: Discount applied
+    MCP-->>User: Updated pricing
+
+    Note over User,DB: Step 11: Update Shipping
+    User->>MCP: update_quote(quote_uuid, shipping_amount)
+    MCP->>GraphQL: insertUpdateQuote mutation
+    GraphQL->>DB: Update shipping
+    DB-->>GraphQL: Updated quote
+    GraphQL-->>MCP: Quote updated
+    MCP-->>User: Final quote amount
+
+    Note over User,DB: Step 12: Confirm Quote
+    User->>MCP: update_quote(status: confirmed)
+    MCP->>GraphQL: insertUpdateQuote mutation
+    GraphQL->>DB: Update status
+    DB-->>GraphQL: Quote confirmed
+    GraphQL-->>MCP: Status updated
+    MCP-->>User: Quote ready for payment
+
+    Note over User,DB: Step 13: Create Installments
+    User->>MCP: create_installment(quote_uuid, amount)
+    MCP->>GraphQL: insertUpdateInstallment mutation
+    GraphQL->>DB: Create installment (status: pending)
+    DB-->>GraphQL: installment_uuid
+    GraphQL-->>MCP: Installment created
+    MCP-->>User: Payment schedule created
+
+    Note over User,DB: Step 14: Process Payment
+    User->>MCP: update_installment(status: paid)
+    MCP->>GraphQL: insertUpdateInstallment mutation
+    GraphQL->>DB: Update installment
+    DB-->>GraphQL: Installment paid
+    GraphQL->>GraphQL: Check if all installments paid
+    GraphQL->>DB: Auto-complete quote & request
+    DB-->>GraphQL: Quote completed
+    GraphQL-->>MCP: Payment processed
+    MCP-->>User: Quote completed
+```
+
+### Activity Diagram: RFQ Request Processing
+
+```mermaid
+flowchart TD
+    Start([User Initiates RFQ]) --> Submit[Submit RFQ Request<br/>status: initial]
+    Submit --> SearchItems[Search Items Catalog]
+    SearchItems --> AddItems[Add Items to Request<br/>status: in_progress]
+
+    AddItems --> CheckItems{All Items<br/>Added?}
+    CheckItems -->|No| SearchItems
+    CheckItems -->|Yes| LookupProviders[Lookup Provider Items<br/>for Each Item]
+
+    LookupProviders --> CheckBatches{Need Batch<br/>Info?}
+    CheckBatches -->|Yes| GetBatches[Get Provider Item Batches]
+    CheckBatches -->|No| AssignProviders
+    GetBatches --> AssignProviders[Assign Provider Items<br/>to Request Items]
+
+    AssignProviders --> CheckAssignments{All Providers<br/>Assigned?}
+    CheckAssignments -->|No| LookupProviders
+    CheckAssignments -->|Yes| CalcPricing[Calculate Quote Pricing<br/>by Provider Groups]
+
+    CalcPricing --> ReviewPricing[User Reviews<br/>Pricing Options]
+    ReviewPricing --> ConfirmRequest[Confirm Request<br/>status: confirmed]
+
+    ConfirmRequest --> CreateQuotes[Create Quotes<br/>One per Provider<br/>status: initial → in_progress]
+
+    CreateQuotes --> Negotiate[Negotiate with User<br/>Show Price Tiers & Discounts]
+    Negotiate --> ApplyDiscounts[Apply Approved Discounts<br/>to Quote Items]
+
+    ApplyDiscounts --> UpdateShipping[Update Quote<br/>with Shipping Info]
+    UpdateShipping --> ConfirmQuote[Confirm Quote<br/>status: confirmed]
+
+    ConfirmQuote --> CreateInstallments[Create Installments<br/>status: pending]
+    CreateInstallments --> ProcessPayment[Process Payments]
+
+    ProcessPayment --> UpdateInstallment[Update Installment<br/>status: paid]
+    UpdateInstallment --> CheckAllPaid{All Installments<br/>Paid?}
+
+    CheckAllPaid -->|No| ProcessPayment
+    CheckAllPaid -->|Yes| AutoComplete[Auto-Complete Quote<br/>status: completed]
+
+    AutoComplete --> AutoCompleteRequest[Auto-Complete Request<br/>status: completed]
+    AutoCompleteRequest --> DisapproveOthers[Auto-Disapprove<br/>Competing Quotes]
+
+    DisapproveOthers --> End([RFQ Completed])
+
+    style Submit fill:#e1f5ff
+    style AddItems fill:#e1f5ff
+    style AssignProviders fill:#fff4e1
+    style CalcPricing fill:#fff4e1
+    style ConfirmRequest fill:#e1ffe1
+    style CreateQuotes fill:#e1f5ff
+    style ApplyDiscounts fill:#fff4e1
+    style ConfirmQuote fill:#e1ffe1
+    style CreateInstallments fill:#e1f5ff
+    style AutoComplete fill:#e1ffe1
+    style AutoCompleteRequest fill:#e1ffe1
+    style DisapproveOthers fill:#ffe1e1
+```
+
+### State Diagram: Request, Quote, and Installment Status Flows
+
+```mermaid
+stateDiagram-v2
+    [*] --> RequestInitial: submit_rfq_request
+
+    state "Request Lifecycle" as RequestFlow {
+        RequestInitial: initial
+        RequestInProgress: in_progress
+        RequestConfirmed: confirmed
+        RequestModified: modified
+        RequestCompleted: completed
+
+        RequestInitial --> RequestInProgress: add/remove items
+        RequestInProgress --> RequestConfirmed: user confirmation
+        RequestConfirmed --> RequestModified: items changed after quote
+        RequestModified --> RequestInProgress: continue editing
+        RequestConfirmed --> RequestCompleted: quote completed
+    }
+
+    state "Quote Lifecycle" as QuoteFlow {
+        QuoteInitial: initial
+        QuoteInProgress: in_progress
+        QuoteConfirmed: confirmed
+        QuoteCompleted: completed
+        QuoteDisapproved: disapproved
+
+        QuoteInitial --> QuoteInProgress: quote items auto-created
+        QuoteInProgress --> QuoteConfirmed: user confirmation
+        QuoteConfirmed --> QuoteCompleted: all installments paid
+        QuoteInitial --> QuoteDisapproved: request modified
+        QuoteInProgress --> QuoteDisapproved: request modified OR<br/>competing quote confirmed
+    }
+
+    state "Installment Lifecycle" as InstallmentFlow {
+        InstallmentPending: pending
+        InstallmentPaid: paid
+        InstallmentCancelled: cancelled
+
+        InstallmentPending --> InstallmentPaid: payment received
+        InstallmentPending --> InstallmentCancelled: payment cancelled
+    }
+
+    RequestConfirmed --> QuoteInitial: create_quote
+    RequestModified --> QuoteDisapproved: auto-disapprove all quotes
+
+    QuoteConfirmed --> InstallmentPending: create_installment
+    InstallmentPaid --> QuoteCompleted: all installments paid
+    QuoteCompleted --> RequestCompleted: auto-complete request
+
+    note right of RequestModified
+        Business Rule:
+        Changing request items
+        after quote creation
+        auto-disapproves all quotes
+    end note
+
+    note right of QuoteCompleted
+        Business Rule:
+        When all installments are paid,
+        quote auto-completes and
+        request auto-completes
+    end note
+
+    note right of QuoteDisapproved
+        Business Rule:
+        When one quote is confirmed,
+        all competing quotes for the
+        same request are disapproved
+    end note
+```
+
 ### mcp_marketing_collection (Reference Pattern)
 - MCP tool definitions with detailed descriptions
 - AWS Lambda client initialization
