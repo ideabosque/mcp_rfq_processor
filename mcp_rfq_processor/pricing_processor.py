@@ -83,7 +83,8 @@ class PricingProcessor(QuoteProcessor):
                 quantityGreaterThen
                 quantityLessThen
                 pricePerUom
-                marginPerUom
+                marginPerom
+                providerItemBatches
                 status
             }
         }
@@ -243,8 +244,7 @@ class PricingProcessor(QuoteProcessor):
             }
 
         # Step 2: Extract and group provider_items by provider_corp_external_id
-        # Note: We no longer need segment_uuid as parameter since we use email
-        grouped_items = self._group_provider_items_from_request(request_items, email)
+        grouped_items = self._group_provider_items_from_request(request_items)
 
         # Step 3: Batch load price tiers for all items
         all_quote_items = []
@@ -325,13 +325,10 @@ class PricingProcessor(QuoteProcessor):
         }
 
     def _group_provider_items_from_request(
-        self, request_items: list, email: str
-    ) -> Dict[str, Dict]:
+        self, request_items: list, segment_uuid: str
+    ) -> Dict[tuple, Dict]:
         """
-        Extract provider_items from request items and group by provider_corp_external_id.
-
-        This method groups items and calculates subtotals based on base pricing.
-        Price tiers are loaded separately via batch optimization in calculate_quote_pricing.
+        Extract provider_items from request items and group by (provider_corp_external_id, segment_uuid).
 
         Request item structure:
         {
@@ -356,12 +353,12 @@ class PricingProcessor(QuoteProcessor):
 
         Args:
             request_items: List of items from request with provider_items arrays
-            email: Customer email (for potential future use in pricing lookups)
+            segment_uuid: Segment UUID for grouping
 
         Returns:
-            Dictionary with provider_id as keys and aggregated data:
+            Dictionary with group keys and aggregated data:
             {
-                "PROV-001": {
+                (provider_id, segment_uuid): {
                     "items": [list of provider items with pricing],
                     "group_subtotal": sum of subtotals
                 }
@@ -448,17 +445,38 @@ class PricingProcessor(QuoteProcessor):
                     else:
                         guardrail_price_per_uom = base_price_per_uom
 
-                    # Use base_price_per_uom for subtotal calculation
-                    # Price tiers will be loaded separately via batch optimization
-                    price_per_uom = base_price_per_uom
+                    # Get price_per_uom from matched price tier
+                    price_per_uom = base_price_per_uom  # Default fallback
+                    price_tiers_result = self.get_item_price_tiers(
+                        item_uuid=item_uuid,
+                        provider_item_uuid=provider_item_uuid,
+                        segment_uuid=segment_uuid,
+                        quantity_value=qty,
+                        limit=1,
+                    )
+
+                    if not propagate_error_if_present(price_tiers_result):
+                        price_tier_list = price_tiers_result.get(
+                            "item_price_tier_list", []
+                        )
+                        if price_tier_list:
+                            price_tier = price_tier_list[0]
+                            # Use batch-specific price_per_uom if available; otherwise use tier price_per_uom
+                            price_per_uom = price_tier.get("price_per_uom")
+                            if batch_no and "provider_item_batches" in price_tier:
+                                # Find matching batch and use its margin_per_uom if available
+                                for batch in price_tier.get(
+                                    "provider_item_batches", []
+                                ):
+                                    if batch.get("batch_no") == batch_no:
+                                        price_per_uom = batch.get("price_per_uom")
+                                        break
 
                     # Ensure price_per_uom is not None before calculation
-                    if price_per_uom is None or price_per_uom <= 0:
-                        self.logger.warning(
-                            f"Invalid price_per_uom for provider item {provider_item_uuid}, using 0"
+                    if price_per_uom is None:
+                        raise ValueError(
+                            f"price_per_uom cannot be None for provider item {provider_item_uuid}"
                         )
-                        price_per_uom = 0
-
                     subtotal = qty * price_per_uom
 
                     # Build item data
@@ -474,9 +492,8 @@ class PricingProcessor(QuoteProcessor):
                         "expired_at": expired_at,
                     }
 
-                    # Group by provider_corp_external_id only
-                    # Segment lookup is handled by email in the batch-optimized queries
-                    group_key = provider_id
+                    # Group by (provider_corp_external_id, segment_uuid)
+                    group_key = (provider_id, segment_uuid)
 
                     if group_key not in groups:
                         groups[group_key] = {
