@@ -227,22 +227,21 @@ sequenceDiagram
     GraphQL-->>MCP: Provider assigned
     MCP-->>User: Assignment confirmed
 
-    Note over User,DB: Step 6: Calculate Pricing
-    User->>MCP: calculate_quote_pricing(request_uuid, segment_uuid)
+    Note over User,DB: Step 6: Calculate Pricing (v0.1.1 Batch-Optimized)
+    User->>MCP: calculate_quote_pricing(request_uuid, email)
+    MCP->>MCP: Build all_quote_items array
+    MCP->>GraphQL: itemPriceTiers query (batch with email + quote_items)
+    GraphQL->>DB: Batch load segments from email
+    GraphQL->>DB: Batch load price tiers for all items
+    DB-->>GraphQL: All price tiers with batches merged
+    GraphQL-->>MCP: Batch price tier data
     MCP->>GraphQL: providerItemList query (get base prices)
     GraphQL->>DB: Query provider items
     DB-->>GraphQL: Provider item prices
     GraphQL-->>MCP: Base prices
-    MCP->>GraphQL: itemPriceTierList query
-    GraphQL->>DB: Query price tiers
-    DB-->>GraphQL: Tiered pricing rules
-    GraphQL-->>MCP: Price tier data
-    MCP->>GraphQL: discountRuleList query
-    GraphQL->>DB: Query discount rules
-    DB-->>GraphQL: Applicable discounts
-    GraphQL-->>MCP: Discount rules
+    MCP->>MCP: Apply client-side quantity filtering
     MCP->>MCP: Calculate grouped pricing by provider
-    MCP-->>User: Pricing options (base, tiers, discounts) by provider
+    MCP-->>User: Pricing groups by provider (82% fewer queries)
 
     Note over User,DB: Step 7: Confirm Request
     User->>MCP: update_rfq_request(status: confirmed)
@@ -260,22 +259,22 @@ sequenceDiagram
     GraphQL-->>MCP: Quote created
     MCP-->>User: quote_uuid, status: in_progress
 
-    Note over User,DB: Step 9: Negotiate Pricing
-    User->>MCP: get_item_price_tiers(item_uuid, provider_item_uuid)
-    MCP->>GraphQL: itemPriceTierList query
-    GraphQL->>DB: Query specific price tiers
-    DB-->>GraphQL: Price tier options
+    Note over User,DB: Step 9: Negotiate Pricing (v0.1.1 Batch-Optimized)
+    User->>MCP: get_discount_prompts(email, quote_items)
+    MCP->>GraphQL: discountPrompts query (hierarchical scopes)
+    GraphQL->>DB: Load prompts from GLOBAL, SEGMENT, ITEM, PROVIDER_ITEM scopes
+    DB-->>GraphQL: Hierarchical discount prompts
+    GraphQL-->>MCP: Combined discount prompts
+    MCP-->>User: "Apply 5% discount for slow-moving items (slow_move_item=true)"
+
+    User->>MCP: get_item_price_tiers(email, quote_items)
+    MCP->>GraphQL: itemPriceTiers query (batch-optimized)
+    GraphQL->>DB: Batch load price tiers for all items
+    DB-->>GraphQL: All price tier options
     GraphQL-->>MCP: Tier details
     MCP-->>User: "Order 200 units for $45/unit instead of $50/unit"
 
-    User->>MCP: get_discount_rules(segment_uuid)
-    MCP->>GraphQL: discountRuleList query
-    GraphQL->>DB: Query segment discounts
-    DB-->>GraphQL: Available discounts
-    GraphQL-->>MCP: Discount options
-    MCP-->>User: "Subtotal qualifies for 10% group discount"
-
-    Note over User,MCP: User confirms pricing and discounts
+    Note over User,MCP: User confirms pricing and discounts based on prompts
 
     Note over User,DB: Step 10: Apply Discounts
     User->>MCP: update_quote_item(quote_item_uuid, discount)
@@ -347,8 +346,8 @@ flowchart TD
 
     ConfirmRequest --> CreateQuotes[Create Quotes<br/>One per Provider<br/>status: initial → in_progress]
 
-    CreateQuotes --> Negotiate[Negotiate with User<br/>Show Price Tiers & Discounts]
-    Negotiate --> ApplyDiscounts[Apply Approved Discounts<br/>to Quote Items]
+    CreateQuotes --> Negotiate[Negotiate with User<br/>Show Price Tiers & Discount Prompts]
+    Negotiate --> ApplyDiscounts[Apply Approved Discounts<br/>to Quote Items (via update_quote_item)]
 
     ApplyDiscounts --> UpdateShipping[Update Quote<br/>with Shipping Info]
     UpdateShipping --> ConfirmQuote[Confirm Quote<br/>status: confirmed]
@@ -1481,18 +1480,19 @@ This is the recommended end-to-end workflow for processing RFQ requests with the
        └─> Repeat for multiple providers/batches if needed
        └─> Result: Request items now have provider_items arrays
 
-7. Calculate Quote Pricing
+7. Calculate Quote Pricing (v0.1.1 Batch-Optimized)
    └─> calculate_quote_pricing(
           request_uuid,
-          segment_uuid
+          email  # Changed from segment_uuid in v0.1.1
        )
+       └─> Uses batch loaders to load all price tiers in one query
        └─> Returns: Grouped pricing structure
-           ├─> Groups by (provider_corp_external_id, segment_uuid)
+           ├─> Groups by provider_corp_external_id
            ├─> Per-group subtotals
-           ├─> Applicable discount_rules for each group
-           ├─> Applicable price_tiers for each item
+           ├─> Price tiers applied with client-side quantity filtering
            └─> Guardrail pricing and slow_move_item flags
        └─> Present pricing options to user
+       └─> Use get_discount_prompts separately for discount suggestions
 
 8. Confirm Request (Status: in_progress → confirmed)
    └─> update_rfq_request(
@@ -1515,32 +1515,32 @@ This is the recommended end-to-end workflow for processing RFQ requests with the
            └─> Returns: quote_uuid
        └─> Multiple quotes possible (one per provider)
 
-10. Negotiate with End User
-    └─> Present price tiers and discount rules
+10. Negotiate with End User (v0.1.1 Batch-Optimized)
+    └─> Present price tiers and discount prompts
         └─> LLM can lookup additional details:
             ├─> get_item_price_tiers(
-                   item_uuid,
-                   provider_item_uuid,
-                   segment_uuid,
-                   max_quantity_greater_then=qty
+                   email,
+                   quote_items=[{item_uuid, provider_item_uuid, qty}]
                 )
                 └─> "If you order 200 instead of 100, price drops to $45/unit"
-            └─> get_discount_rules(
-                   segment_uuid,
-                   max_subtotal_greater_than=subtotal
+            └─> get_discount_prompts(
+                   email,
+                   quote_items=[{item_uuid, provider_item_uuid}]
                 )
-                └─> "Your subtotal qualifies for 10% group discount"
+                └─> Returns hierarchical prompts: "Apply 5% discount for slow-moving items"
+                └─> Scopes: GLOBAL, SEGMENT, ITEM, PROVIDER_ITEM
         └─> User confirms or negotiates pricing
 
 11. Apply Discounts with User Confirmation (Status: in_progress)
-    └─> For each quote item with approved discount:
+    └─> Based on discount prompts and user approval:
         └─> update_quote_item(
                quote_uuid,
                quote_item_uuid,
-               discount_amount=500.00
+               discount_amount=500.00  # or discount_percent=5.0
             )
         └─> Backend recalculates subtotals automatically
         └─> Quote remains in "in_progress" status
+        └─> Discount prompts guide LLM on valid discount conditions
 
 12. Update Quote with Shipping (Status: in_progress)
     └─> update_quote(
@@ -1584,13 +1584,14 @@ This is the recommended end-to-end workflow for processing RFQ requests with the
 
 ### Key Workflow Principles
 
-1. **Segment-First**: Always identify customer segment before pricing
+1. **Email-Based Segment Lookup (v0.1.1)**: Use email parameter instead of explicit segment_uuid for automatic segment resolution
 2. **Provider Items in Request**: Assign provider_items to request items, NOT directly to quotes
 3. **Calculate Before Quote**: Use `calculate_quote_pricing` to show options BEFORE creating quotes
 4. **One Quote Per Provider**: Create separate quotes for each provider_corp_external_id
-5. **LLM-Driven Negotiation**: Let LLM explore price tiers and discount rules with user
-6. **User Confirmation Required**: Always confirm with user before applying discounts or creating quotes
-7. **Installments After Approval**: Only create installments after quote is confirmed by user
+5. **LLM-Driven Negotiation**: Let LLM explore price tiers and discount prompts with user
+6. **Batch-Optimized Queries (v0.1.1)**: Single GraphQL query loads all price tiers for all items (82% reduction)
+7. **User Confirmation Required**: Always confirm with user before applying discounts or creating quotes
+8. **Installments After Approval**: Only create installments after quote is confirmed by user
 
 ### New Request Workflow (Simplified)
 
@@ -1608,14 +1609,15 @@ Steps 0-6: Request Creation & Provider Assignment
    └─> (Optional) Lookup batches for slow-move inventory
    └─> Assign provider_items to request items
 
-Step 7: Calculate Quote Pricing
-   └─> calculate_quote_pricing(request_uuid, segment_uuid)
-       └─> Returns grouped pricing with discount_rules and price_tiers
+Step 7: Calculate Quote Pricing (v0.1.1 Batch-Optimized)
+   └─> calculate_quote_pricing(request_uuid, email)
+       └─> Returns grouped pricing with price tiers (batch-loaded)
+       └─> Use get_discount_prompts(email, quote_items) separately
        └─> LLM presents options to user
 
 Steps 8-13: Quote Generation & Finalization
    └─> Create quotes by user confirmation (one per provider)
-   └─> Negotiate with end user using discount rules
+   └─> Negotiate with end user using discount prompts (hierarchical scopes)
    └─> Apply discounts with user confirmation
    └─> Update quote with shipping
    └─> Generate installment plan (if needed)
@@ -1661,8 +1663,8 @@ A. Modify Request Items (Add/Remove Items) - Status Impact
        └─> Get updated request
        └─> Assign provider_items to new/modified items (Step 6 of main workflow)
    
-   └─> Step 4: Recalculate pricing
-       └─> calculate_quote_pricing(request_uuid, segment_uuid)
+   └─> Step 4: Recalculate pricing (v0.1.1)
+       └─> calculate_quote_pricing(request_uuid, email)
        └─> Present new pricing to user
    
    └─> Step 5: Confirm request (Status: in_progress → confirmed)
@@ -1708,11 +1710,12 @@ Key Principles for Modifications (Status-Aware):
    2. Modified requests auto-disapprove ALL related quotes (business rule)
    3. Quote modifications restricted by current status (operation guards)
    4. Provider_items must be reassigned after request item changes
-   5. Recalculate pricing after any item/provider changes (Step 7)
+   5. Recalculate pricing after any item/provider changes (Step 7, use email parameter v0.1.1)
    6. Adding/removing items ALWAYS requires going through request modification flow
    7. Status transitions are validated at each step
    8. Disapproved quotes remain for audit trail (not deleted)
    9. Always get user confirmation before applying changes
+   10. Use batch-optimized queries (v0.1.1) for better performance
 ```
 
 ### Discount Management Workflow
