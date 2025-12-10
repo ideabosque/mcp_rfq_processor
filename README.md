@@ -13,8 +13,8 @@ The MCP RFQ Processor connects AI assistants to the `ai_rfq_engine` GraphQL back
 - **Document Management**: Upload and track RFQ-related files
 - **Segment Management**: Organize customers and providers into pricing segments
 
-**Current Version**: 0.1.0  
-**Total MCP Tools**: 29 (implemented in `mcp_configuration.py`)
+**Current Version**: 0.1.1
+**Total MCP Tools**: 28 (implemented in `mcp_configuration.py`)
 
 ### Current Feature Highlights
 
@@ -29,9 +29,11 @@ The MCP RFQ Processor connects AI assistants to the `ai_rfq_engine` GraphQL back
 - **Provider Assignment Helpers**
   - `assign_provider_item_to_request_item` and `remove_provider_item_from_request_item` manage provider links on requests
   - Quote creation pulls assigned provider items to build quote items automatically
-- **Pricing Intelligence**
-  - `calculate_quote_pricing` groups request items by provider/segment and attaches batch pricing, guardrails, price tiers, and discount rules
-  - Item-level discount and price tier lookup utilities for LLM prompting
+- **Pricing Intelligence with Batch Optimization**
+  - `calculate_quote_pricing` uses email-based batch loaders to efficiently group request items by provider
+  - Single GraphQL query retrieves all price tiers for all items using DataLoader pattern
+  - `get_item_price_tiers` supports batch queries with email + quote_items array
+  - `get_discount_prompts` efficiently loads discount prompts from all hierarchical scopes
 - **Workflow Convenience**
   - `confirm_request_and_create_quotes` and `confirm_quote_and_create_installments` wrap multi-step flows for quicker automation
 
@@ -129,7 +131,7 @@ processor.endpoint_id = "your-endpoint-id"
 
 ## Available MCP Tools
 
-All 29 tools are defined in `mcp_configuration.py` and exposed by `MCPRfqProcessor`.
+All 28 tools are defined in `mcp_configuration.py` and exposed by `MCPRfqProcessor`.
 
 ### 1. Request Management (8 tools)
 
@@ -443,80 +445,116 @@ Update an existing quote item (discount amount only). Used to apply discounts af
 ### 4. Pricing & Discounts (3 tools)
 
 #### `get_item_price_tiers`
-Retrieve tiered pricing for an item.
+Get tiered pricing for multiple items using batch loader optimization.
 
-**Note**: Typically used via `calculate_quote_pricing` which automatically filters by quantity. Direct use available for LLM-driven price exploration.
+**Batch-Optimized Approach**: Uses customer email for segment lookup and efficiently loads price tiers for quote items with automatic quantity filtering. Returns only tiers matching each item's quantity range. Preferred for processing multiple items efficiently.
 
 **Input:**
 ```json
 {
-  "item_uuid": "item-uuid",
-  "provider_item_uuid": "optional-provider-item-uuid",
-  "segment_uuid": "optional-segment-uuid",
-  "quantity_value": 100,
-  "min_price": "optional-float",
-  "max_price": "optional-float"
+  "email": "customer@example.com",
+  "quote_items": [
+    {
+      "item_uuid": "item-uuid",
+      "provider_item_uuid": "provider-item-uuid",
+      "qty": 100
+    }
+  ]
 }
 ```
 
 **Parameters:**
-- `quantity_value`: Find the price tier that matches this specific quantity (finds tiers where quantity_greater_then <= value < quantity_less_then)
-- Other filters available for price range exploration
+- `email`: Customer email address for segment lookup (required)
+- `quote_items`: List of quote items with item_uuid, provider_item_uuid, and qty. Each item will have its applicable price tiers returned based on quantity thresholds.
 
-**Output:** List of price tiers (quantity ranges and prices).
+**Output:** List of price tiers with provider_item_batches merged.
 
-**Updated in v1.1.0**: Simplified to use `quantity_value` parameter instead of min/max filters for finding matching tiers.
+```json
+{
+  "item_price_tiers": [
+    {
+      "item_uuid": "...",
+      "provider_item_uuid": "...",
+      "quantity_greater_then": 50,
+      "quantity_less_then": 200,
+      "price_per_uom": 10.5,
+      "margin_per_uom": 2.0,
+      "provider_item_batches": [
+        {
+          "batch_no": "LOT-2025-001",
+          "price_per_uom": 10.0
+        }
+      ]
+    }
+  ]
+}
+```
 
-#### `get_discount_rules`
-Get applicable discount rules for item-level pricing.
+**Updated in v0.1.1**: Refactored to use batch loaders with email-based segment lookup for better performance.
 
-**Note**: Typically used via `calculate_quote_pricing` which automatically filters by item subtotal. Direct use available for LLM-driven discount exploration.
+#### `get_discount_prompts`
+Get discount prompts for items using batch loader optimization.
+
+**Batch-Optimized Approach**: Loads prompts from all hierarchical scopes (GLOBAL, SEGMENT, ITEM, PROVIDER_ITEM) and deduplicates. Returns combined discount prompts with conditions and rules. Preferred for processing multiple items efficiently.
 
 **Input:**
 ```json
 {
-  "item_uuid": "item-uuid",
-  "provider_item_uuid": "provider-item-uuid",
-  "segment_uuid": "segment-uuid",
-  "subtotal_value": 1000.0,
-  "max_discount_percentage": "optional-float",
-  "min_discount_percentage": "optional-float"
+  "email": "customer@example.com",
+  "quote_items": [
+    {
+      "item_uuid": "item-uuid",
+      "provider_item_uuid": "provider-item-uuid"
+    }
+  ]
 }
 ```
 
-**Required Parameters:**
-- `item_uuid`: Item UUID (required for item-specific discount rules)
-- `provider_item_uuid`: Provider item UUID (required for provider-specific pricing)
-- `segment_uuid`: Customer segment UUID (required for segment-specific pricing)
+**Parameters:**
+- `email`: Customer email address for segment lookup (required)
+- `quote_items`: List of quote items with item_uuid and provider_item_uuid to determine applicable prompts
 
-**Optional Parameters:**
-- `subtotal_value`: Find rules applicable to a specific subtotal amount (finds rules where subtotal_greater_than <= value < subtotal_less_than)
-- `max_discount_percentage`: Filter by maximum discount percentage threshold
-- `min_discount_percentage`: Filter by minimum discount percentage threshold
+**Output:** Combined discount prompts from all hierarchical scopes.
 
-**Output:** List of discount rules with conditions and percentages (only 'active' status).
+```json
+{
+  "discount_prompts": [
+    {
+      "scope": "SEGMENT",
+      "prompt": "Apply 5% discount for slow-moving items",
+      "conditions": "slow_move_item=true",
+      "max_discount_percentage": 5.0
+    }
+  ]
+}
+```
 
-**Updated in v1.1.0**: Simplified to use `subtotal_value` parameter and made item/provider/segment parameters required.
+**New in v0.1.1**: Replaces `get_discount_rules` with batch-optimized prompt loading across hierarchical scopes.
 
 #### `calculate_quote_pricing`
-Calculate grouped pricing from request with provider_items, returning applicable discount rules and price tiers for LLM-driven decision making.
+Calculate pricing information for an RFQ request using batch-optimized queries.
 
-**Note**: This reads from REQUEST (not quote) and groups items by (provider_corp_external_id, segment_uuid). Use this BEFORE creating quotes (Step 7 in workflow).
+**Batch-Optimized Approach**: Groups items by provider and provides subtotals and price tiers. Uses batch loaders for efficient multi-item processing. Returns pricing structure for decision-making.
+
+**Note**: This reads from REQUEST (not quote) and groups items by provider_corp_external_id. Use this BEFORE creating quotes (Step 7 in workflow).
 
 **Input:**
 ```json
 {
   "request_uuid": "request-uuid",
-  "segment_uuid": "segment-uuid"
+  "email": "customer@example.com"
 }
 ```
 
-**Output:** Grouped pricing structure with item-level discount rules and price tiers.
+**Parameters:**
+- `request_uuid`: UUID of the RFQ request (required)
+- `email`: Customer email for segment lookup and batch-optimized price tier queries (required)
+
+**Output:** Grouped pricing structure with items grouped by provider.
 
 ```json
 {
   "request_uuid": "req-uuid",
-  "segment_uuid": "seg-uuid",
   "groups": [
     {
       "provider_corp_external_id": "PROVIDER-001",
@@ -530,25 +568,22 @@ Calculate grouped pricing from request with provider_items, returning applicable
           "guardrail_price_per_uom": 9.50,
           "slow_move_item": true,
           "expired_at": "2026-03-15T00:00:00Z",
-          "subtotal": 4750.00,
-          "price_tiers": [...],
-          "discount_rules": [...]
+          "subtotal": 4750.00
         }
       ],
-      "subtotal": 4750.00
+      "group_subtotal": 4750.00
     }
-  ],
-  "subtotal": 4750.00
+  ]
 }
 ```
 
 **Key Features:**
-- Groups items by provider for multi-provider comparison
-- Returns item-level discount_rules (based on item subtotal) and price_tiers WITHOUT applying them
-- LLM presents options to user and applies discounts only after confirmation
-- Includes batch-specific pricing with slow_move_item flags
+- Uses single batch-optimized GraphQL query for all price tiers
+- Groups items by provider_corp_external_id for multi-provider comparison
+- Includes batch-specific pricing with slow_move_item flags and guardrail pricing
+- Returns pricing structure WITHOUT applying discounts (LLM can use get_discount_prompts separately)
 
-**Updated in v1.1.0**: Discount rules moved to item-level (based on item subtotal) instead of group-level.
+**Updated in v0.1.1**: Refactored to use email-based batch loaders instead of segment_uuid. Price tiers and discount prompts now fetched separately via dedicated batch-optimized functions.
 
 ---
 
@@ -882,12 +917,12 @@ updated_items[0]["provider_items"] = [
 ]
 processor.update_rfq_request(request_uuid=request_uuid, items=updated_items)
 
-# Step 7: Calculate pricing with discount rules (NEW)
+# Step 7: Calculate pricing with batch optimization (NEW)
 pricing = processor.calculate_quote_pricing(
     request_uuid=request_uuid,
-    segment_uuid=segment_uuid
+    email="buyer@customer.com"  # Uses email instead of segment_uuid
 )
-# Returns grouped pricing with item-level discount_rules and price_tiers for LLM decision-making
+# Returns grouped pricing structure with items by provider
 # {
 #   "groups": [{
 #     "provider_corp_external_id": "PROVIDER-001",
@@ -900,14 +935,20 @@ pricing = processor.calculate_quote_pricing(
 #       "guardrail_price_per_uom": 9.50,
 #       "slow_move_item": true,
 #       "expired_at": "2026-03-15T00:00:00Z",
-#       "subtotal": 4750.00,
-#       "price_tiers": [...],      # Available pricing tiers for this item
-#       "discount_rules": [...]    # Applicable discount rules for this item (based on item subtotal)
+#       "subtotal": 4750.00
 #     }],
-#     "subtotal": 4750.00
-#   }],
-#   "subtotal": 4750.00
+#     "group_subtotal": 4750.00
+#   }]
 # }
+
+# Optional: Get discount prompts separately
+discount_prompts = processor.get_discount_prompts(
+    email="buyer@customer.com",
+    quote_items=[{
+        "item_uuid": "item-uuid-1",
+        "provider_item_uuid": "prov-item-uuid-1"
+    }]
+)
 
 # Step 8-10: Create quote (quote items are auto-created from provider assignments)
 quote = processor.create_quote(

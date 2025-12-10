@@ -1,8 +1,8 @@
 # Development Plan: MCP RFQ Processor Integration
 
-## Project Status: ✅ COMPLETED
+## Project Status: ✅ COMPLETED - v0.1.1 Batch Optimization
 
-**Last Updated**: 2025-11-20 (v0.1.0)
+**Last Updated**: 2025-12-10 (v0.1.1)
 
 All planned features in the current codebase are implemented and production-ready. This document is kept as a snapshot of the architecture and workflow decisions reflected in version 0.1.0.
 
@@ -12,8 +12,12 @@ This document outlines the complete development plan for integrating the `ai_rfq
 
 ### Implementation Summary
 
-- **Total MCP Tools**: 29 (implemented)
+- **Total MCP Tools**: 28 (implemented) - Optimized in v0.1.1
 - **Layered Processors**: Request → Item → Quote → Pricing → Installment → File → Segment processors with shared GraphQL client/error handling
+- **Batch-Optimized Pricing**: Email-based batch loaders using DataLoader pattern (v0.1.1)
+  - Single GraphQL query for all price tiers (82% query reduction)
+  - Client-side quantity filtering for multi-item scenarios
+  - Hierarchical discount prompt loading across all scopes
 - **Status & Validation**: Request/Quote/Installment status guards and auto-transition helpers (`status_manager`)
 - **Workflow Helpers**: Convenience methods for confirming requests/quotes and creating quotes/installments in one call
 - **GraphQL Integration**: Schema caching and auto-generation via `graphql_client.py`
@@ -1142,18 +1146,26 @@ def update_quote_item_discount(self, **arguments: Dict[str, Any]) -> Dict[str, A
 ### 4.1 Pricing & Discounts
 **Priority**: High (Phase 2)
 **Estimated Time**: 4 hours
-**Status**: ✅ COMPLETED - 3 tools implemented
+**Status**: ✅ COMPLETED - 3 tools implemented | ✅ **OPTIMIZED v0.1.1**
 
 **Tools implemented**:
-- `get_item_price_tiers` - Query itemPriceTierList
-- `get_discount_rules` - Query discountRuleList
-- `calculate_quote_pricing` - Custom logic combining multiple queries
+- `get_item_price_tiers` - Batch-optimized with email + quote_items (v0.1.1)
+- `get_discount_prompts` - Hierarchical scope loading (v0.1.1, replaces get_discount_rules)
+- `calculate_quote_pricing` - Email-based batch loaders (v0.1.1)
+
+**v0.1.1 Batch Optimization**:
+- ✅ Refactored to use email instead of segment_uuid
+- ✅ Single GraphQL query for all price tiers (DataLoader pattern)
+- ✅ Client-side quantity filtering for accurate tier matching
+- ✅ 82% reduction in GraphQL queries (10 items: 11→2 queries)
 
 **Tasks**:
 - [x] Implement get_item_price_tiers
-- [x] Implement get_discount_rules
+- [x] Implement get_discount_prompts (replaced get_discount_rules)
 - [x] Implement calculate_quote_pricing (business logic)
 - [x] Write pricing calculation tests
+- [x] **v0.1.1**: Refactor for batch optimization
+- [x] **v0.1.1**: Add client-side quantity filtering
 
 ### 4.2 Installment Management
 **Priority**: Medium (Phase 2)
@@ -1937,6 +1949,137 @@ processor.update_installment(
 
 ---
 
+## v0.1.1 Batch Optimization Implementation Details
+
+### Overview
+Version 0.1.1 introduces significant performance improvements through batch-optimized GraphQL queries using the DataLoader pattern from ai_rfq_engine.
+
+### Key Changes
+
+#### 1. Email-Based Segment Lookup
+**Before v0.1.1:**
+```python
+# Explicit segment lookup required
+segment_contacts = processor.get_segment_contacts(email=email)
+segment_uuid = segment_contacts[0]["segment_uuid"]
+
+# Use segment_uuid in pricing calls
+tiers = processor.get_item_price_tiers(
+    item_uuid=item_uuid,
+    provider_item_uuid=provider_item_uuid,
+    segment_uuid=segment_uuid
+)
+```
+
+**After v0.1.1:**
+```python
+# Email-based batch optimization
+tiers = processor.get_item_price_tiers(
+    email=email,  # Automatic segment lookup via batch loader
+    quote_items=[{
+        "item_uuid": item_uuid,
+        "provider_item_uuid": provider_item_uuid,
+        "qty": qty
+    }]
+)
+```
+
+#### 2. Batch Query Structure
+**Before v0.1.1 (N+1 Query Problem):**
+```python
+# Individual queries per item
+for item in items:
+    tier = get_item_price_tiers(
+        item_uuid=item["item_uuid"],
+        provider_item_uuid=item["provider_item_uuid"],
+        segment_uuid=segment_uuid
+    )
+# Result: 1 + N queries
+```
+
+**After v0.1.1 (DataLoader Pattern):**
+```python
+# Single batch query for all items
+all_quote_items = [
+    {"item_uuid": i["item_uuid"], "provider_item_uuid": i["provider_item_uuid"], "qty": i["qty"]}
+    for i in items
+]
+all_tiers = get_item_price_tiers(email=email, quote_items=all_quote_items)
+# Result: 1 query (uses server-side batch loaders)
+```
+
+#### 3. Client-Side Quantity Filtering
+**Problem Solved:**
+When multiple line items share the same (item_uuid, provider_item_uuid) but have different quantities, the server returns ALL tiers matching ANY quantity. Client-side filtering ensures each line item gets the correct tier.
+
+**Implementation:**
+```python
+# Filter price tiers by quantity for each line item
+matching_tiers = []
+for tier in price_tiers:
+    qty_greater = float(tier.get("quantity_greater_then", 0))
+    qty_less = float(tier.get("quantity_less_then", float('inf')))
+
+    # Check if this tier applies: qty_greater < qty <= qty_less
+    if qty_greater < qty <= qty_less:
+        matching_tiers.append(tier)
+```
+
+**Example Scenario:**
+- Line item 1: item_uuid=A, provider_item_uuid=B, qty=300, batch_no=LOT-001
+- Line item 2: item_uuid=A, provider_item_uuid=B, qty=700, batch_no=LOT-002
+
+Server returns tiers for both 300 and 700 quantities. Client filters each line item's tiers by its specific qty.
+
+#### 4. Hierarchical Discount Prompts
+**Replaces:** `get_discount_rules` (item-level)
+**New:** `get_discount_prompts` (all scopes)
+
+**Scopes Loaded:**
+1. **GLOBAL**: System-wide discount prompts
+2. **SEGMENT**: Customer segment-specific prompts
+3. **ITEM**: Item-specific prompts
+4. **PROVIDER_ITEM**: Provider item-specific prompts
+
+**Benefits:**
+- Single query loads prompts from all hierarchical levels
+- Automatic deduplication of prompts
+- LLM can see all applicable discount conditions
+
+### Performance Metrics
+
+| Operation | Before v0.1.1 | After v0.1.1 | Improvement |
+|-----------|---------------|--------------|-------------|
+| calculate_quote_pricing (10 items) | 11 queries | 2 queries | 82% reduction |
+| get_item_price_tiers (10 items) | 10 queries | 1 query | 90% reduction |
+| Segment lookup overhead | Required explicit call | Automatic via batch loader | Eliminated |
+
+### Migration Impact
+
+**Breaking Changes:**
+- `calculate_quote_pricing`: Changed from `segment_uuid` to `email` parameter
+- `get_item_price_tiers`: Completely new signature (email + quote_items array)
+- `get_discount_rules`: Replaced by `get_discount_prompts`
+
+**Deprecated:**
+- `get_segment_contacts`: Segment lookup now handled automatically
+
+### Technical Architecture
+
+**Server-Side (ai_rfq_engine):**
+- Uses `resolve_item_price_tiers` with DataLoader pattern
+- Batch loads segments from email via `segment_contact_loader`
+- Batch loads price tiers via `item_price_tier_loader`
+- Merges provider_item_batches into tier responses
+
+**Client-Side (mcp_rfq_processor):**
+- Builds `all_quote_items` array upfront
+- Makes single batch GraphQL call
+- Stores results in `price_tier_map` keyed by (item_uuid, provider_item_uuid)
+- Filters tiers by quantity for each line item during processing
+
+---
+
 ## Questions & Clarifications
 
 - [ ] What is the production endpoint_id for ai_rfq_graphql?
@@ -1953,6 +2096,7 @@ processor.update_installment(
 |------|---------|---------|--------|
 | 2025-11-05 | 0.1.0-plan | Initial development plan drafted | Development Team |
 | 2025-11-20 | 0.1.0 | Modular MCP release with 29 tools, provider assignment helpers, auto-created quote items, workflow convenience functions, and updated documentation | Development Team |
+| 2025-12-10 | 0.1.1 | **Batch Optimization Release**: Refactored pricing functions to use email-based batch loaders (82% query reduction), added client-side quantity filtering, replaced get_discount_rules with get_discount_prompts (hierarchical scope loading), deprecated get_segment_contacts, reduced to 28 tools | Development Team |
 
 ---
 
@@ -1961,47 +2105,68 @@ processor.update_installment(
 ### ✅ What Was Built
 
 **Core Package:**
-- `MCPRfqProcessor` class with 29 implemented tools exposed in `mcp_configuration.py`
-- Layered processors (Request → Item → Quote → Pricing → Installment → File → Segment) sharing GraphQL execution, error handling, and status guards
+- `MCPRfqProcessor` class with 28 implemented tools exposed in `mcp_configuration.py`
+- Layered processors (Request → Item → Quote → Pricing → Installment → File) sharing GraphQL execution, error handling, and status guards
+- **Batch-Optimized Pricing (v0.1.1)**: Email-based batch loaders using DataLoader pattern
 - GraphQL integration with schema caching and AWS Lambda execution support
 
-**MCP Tools (29 total):**
+**MCP Tools (28 total - v0.1.1):**
 1. Request Management (8): submit, update, add_item, remove_item, assign_provider_item, remove_provider_item, get, search
 2. Item & Inventory (4): search_items, get_item, get_provider_items, get_provider_item_batches
 3. Quote Management (5): create, update, update_quote_item, get, search
-4. Pricing (3): get_price_tiers, get_discount_rules, calculate_quote_pricing
+4. Pricing (3 - **Batch-Optimized v0.1.1**):
+   - get_item_price_tiers (email + quote_items array)
+   - get_discount_prompts (hierarchical scope loading)
+   - calculate_quote_pricing (email-based batch loaders)
 5. Installments (4): create_installment, update_installment, create_installments, get_installments
 6. Workflow Convenience (2): confirm_request_and_create_quotes, confirm_quote_and_create_installments
 7. Files (2): upload, get
-8. Segments (1): get_contacts (read-only)
+8. Segments (0): DEPRECATED - segment lookup now via email in pricing tools
 
 **Testing:**
 - Pytest suite covering status transitions, pricing calculations, and workflow helpers
 - Mock strategies for GraphQL integration
+- Client-side quantity filtering tests (v0.1.1)
 
 **Documentation:**
-- README.md: User guide with workflows and examples
-- API_REFERENCE.md: GraphQL mappings and type definitions
-- DEVELOPMENT_PLAN.md: Architectural snapshot and history
+- README.md: User guide with workflows and examples (updated v0.1.1)
+- API_REFERENCE.md: GraphQL mappings and type definitions (updated v0.1.1)
+- DEVELOPMENT_PLAN.md: Architectural snapshot and history (updated v0.1.1)
+- **CHANGELOG.md: Formal release tracking (new v0.1.1)**
+
+**Performance Improvements (v0.1.1):**
+- 82% reduction in GraphQL queries for pricing operations
+- Example: 10 provider items: 11 queries → 2 queries
+- DataLoader pattern prevents N+1 query problems
 
 ### 🎯 Key Achievements
 
-1. **Streamlined Focus**: 25 tools focused on RFQ workflow (removed segment write operations)
-2. **Enhanced Flexibility**: Kept direct quote item operations for better UX
-3. **Added Conveniences**: Request item add/remove helper methods
-4. **Comprehensive Testing**: 1008 lines of test coverage
-5. **Complete Documentation**: All docs updated and production-ready
-6. **Production Ready**: Version 0.1.1 ready for deployment
+1. **Batch Optimization (v0.1.1)**: Reduced GraphQL queries by 82% using DataLoader pattern
+2. **Email-Based Segment Lookup (v0.1.1)**: Simplified API by removing explicit segment_uuid parameters
+3. **Client-Side Filtering (v0.1.1)**: Fixed quantity mismatch issues with proper tier filtering
+4. **Hierarchical Discount Prompts (v0.1.1)**: New approach loading from all scopes (GLOBAL, SEGMENT, ITEM, PROVIDER_ITEM)
+5. **Streamlined Focus**: 28 tools focused on RFQ workflow (deprecated segment tools in v0.1.1)
+6. **Enhanced Flexibility**: Kept direct quote item operations for better UX
+7. **Added Conveniences**: Request item add/remove helper methods
+8. **Comprehensive Testing**: 1008 lines of test coverage
+9. **Complete Documentation**: All docs updated and production-ready (v0.1.1)
+10. **Production Ready**: Version 0.1.1 ready for deployment
 
 ### 📋 Recommendations for Future Enhancements
 
 1. **Integration Testing**: Set up end-to-end tests with real ai_rfq_engine
 2. **CI/CD Pipeline**: Implement automated testing and deployment
-3. **CHANGELOG.md**: Create formal changelog for release tracking
+3. ~~**CHANGELOG.md**: Create formal changelog for release tracking~~ ✅ **COMPLETED v0.1.1**
 4. **Performance Monitoring**: Add metrics for GraphQL query performance
 5. **Enhanced Error Messages**: Provide more user-friendly error responses
-6. **Batch Operations**: Consider bulk quote item operations for efficiency
+6. ~~**Batch Operations**: Consider bulk quote item operations for efficiency~~ ✅ **COMPLETED v0.1.1** (batch-optimized pricing)
 
 ### 🚀 Ready for Production
 
-The MCP RFQ Processor is fully implemented, tested, and documented. All 25 tools are production-ready and can be deployed immediately.
+The MCP RFQ Processor is fully implemented, tested, and documented. All 28 tools are production-ready and can be deployed immediately.
+
+**v0.1.1 Highlights**:
+- **Performance**: 82% reduction in GraphQL queries for pricing operations
+- **Simplicity**: Email-based API eliminates need for explicit segment lookups
+- **Accuracy**: Client-side quantity filtering ensures correct tier matching
+- **Completeness**: Hierarchical discount prompts from all scopes

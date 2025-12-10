@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-rfq-processor"
-version = "0.1.0"
-description = "MCP server for RFQ processing with ai_rfq_engine integration"
+version = "0.1.1"
+description = "MCP server for RFQ processing with ai_rfq_engine integration - Batch-optimized pricing"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}

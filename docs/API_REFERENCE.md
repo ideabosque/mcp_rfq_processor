@@ -4,8 +4,8 @@
 
 This document provides a comprehensive reference for the GraphQL API operations used by the MCP RFQ Processor, including all queries, mutations, and type definitions from the `ai_rfq_engine` GraphQL backend.
 
-**Version**: 0.1.0
-**Total MCP Tools**: 29 (all implemented)
+**Version**: 0.1.1
+**Total MCP Tools**: 28 (all implemented)
 **GraphQL Endpoint**: ai_rfq_graphql (AWS Lambda)
 
 ## Table of Contents
@@ -213,120 +213,95 @@ Search quotes.
 
 ### Pricing Queries
 
-#### `itemPriceTierList`
-Get active tiered pricing for items based on item, provider, and customer segments.
+#### `itemPriceTiers` (Batch-Optimized)
+Get tiered pricing for multiple items using batch loader optimization.
 
-**Note:** Typically used via `calculate_quote_pricing` which automatically filters tiers by quantity. Direct use is available for LLM-driven price exploration.
+**Note:** This is the preferred method for fetching price tiers. Uses email-based segment lookup and DataLoader pattern for efficient multi-item queries.
 
 **Variables:**
 ```graphql
 {
-  pageNumber: Int
-  limit: Int
-  itemUuid: String
-  providerItemUuid: String
-  segmentUuid: String
-  quantityValue: Int  # Find tier where quantityGreaterThen <= value < quantityLessThen
-  minPrice: Float     # Filter: tier.price >= value
-  maxPrice: Float     # Filter: tier.price <= value
-  status: String      # Fixed to "active"
+  email: String!          # Customer email for segment lookup
+  quoteItems: [JSON]      # Array of {item_uuid, provider_item_uuid, qty}
 }
 ```
 
-**Updated in v1.1.0**: Simplified to use `quantityValue` parameter instead of min/max quantity filters.
+**Updated in v0.1.1**: New batch-optimized query replacing individual `itemPriceTierList` calls. Uses DataLoaders to prevent N+1 queries.
 
-**Returns:** `ItemPriceTierListType`
+**Returns:** Array of `ItemPriceTierType` objects with merged provider_item_batches
 
 **Response Fields:**
-- `itemPriceTierList`: Array of price tiers
-  - `itemPriceTierUuid`: Unique identifier
+- Array of price tier objects:
   - `itemUuid`: Item UUID
   - `providerItemUuid`: Provider item UUID
-  - `segment`: Segment details (JSON)
+  - `itemPriceTierUuid`: Unique identifier
   - `quantityGreaterThen`: Minimum quantity threshold for this tier
   - `quantityLessThen`: Maximum quantity threshold for this tier
-  - `marginPerUom`: Margin per unit of measure
+  - `pricePerUom`: Price per unit of measure (if specified)
+  - `marginPerUom`: Margin per unit of measure (if specified)
+  - `providerItemBatches`: Array of batch-specific pricing overrides
+    - `batchNo`: Batch number
+    - `pricePerUom`: Batch-specific price override
   - `status`: Tier status (always "active")
-  - `createdAt`: Creation timestamp
-  - `updatedAt`: Last update timestamp
-  - `updatedBy`: Last updated by user
-- `pageSize`: Items per page
-- `pageNumber`: Current page number
-- `total`: Total number of active price tiers
 
-#### `discountRuleList`
-Get discount rules for item-level pricing with filtering options for subtotal and discount percentages.
+#### `discountPrompts` (Batch-Optimized)
+Get discount prompts for items using hierarchical scope loading.
 
-**Note:** Typically used via `calculate_quote_pricing` which automatically filters rules by item subtotal. Direct use is available for LLM-driven discount exploration.
+**Note:** This is the preferred method for fetching discount prompts. Loads from all scopes (GLOBAL, SEGMENT, ITEM, PROVIDER_ITEM) and deduplicates.
 
 **Variables:**
 ```graphql
 {
-  pageNumber: Int
-  limit: Int
-  itemUuid: String!              # REQUIRED - Item UUID for item-specific rules
-  providerItemUuid: String!      # REQUIRED - Provider item UUID for provider-specific pricing
-  segmentUuid: String!           # REQUIRED - Segment UUID for segment-specific pricing
-  subtotalValue: Float           # Find rule where subtotalGreaterThan <= value < subtotalLessThan
-  maxDiscountPercentage: Float   # Filter: rule.discount <= value
-  minDiscountPercentage: Float   # Filter: rule.discount >= value
-  status: String                 # Filter by status (e.g., "active", "inreview")
+  email: String!          # Customer email for segment lookup
+  quoteItems: [JSON]      # Array of {item_uuid, provider_item_uuid}
 }
 ```
 
-**Updated in v1.1.0**: Simplified to use `subtotalValue` parameter and made item/provider/segment parameters required. Rules are now item-level (not group-level).
+**New in v0.1.1**: Replaces `discountRuleList` with hierarchical prompt loading across all scopes.
 
-**Returns:** `DiscountRuleListType`
+**Returns:** Array of `DiscountPromptType` objects
 
 **Response Fields:**
-- `discountRuleList`: Array of discount rules
-  - `discountRuleUuid`: Unique identifier
-  - `providerItem`: Provider item details (JSON)
-  - `segment`: Segment details (JSON)
-  - `subtotalGreaterThan`: Minimum subtotal threshold for rule to apply
-  - `subtotalLessThan`: Maximum subtotal threshold for rule to apply
-  - `maxDiscountPercentage`: Maximum discount percentage allowed
-  - `status`: Rule status (e.g., "inreview")
-  - `createdAt`: Creation timestamp
-  - `updatedAt`: Last update timestamp
-  - `updatedBy`: Last updated by user
-- `pageSize`: Items per page
-- `pageNumber`: Current page number
-- `total`: Total number of discount rules
+- Array of discount prompt objects:
+  - `scope`: Scope level (GLOBAL, SEGMENT, ITEM, PROVIDER_ITEM)
+  - `prompt`: Discount prompt text with conditions
+  - `maxDiscountPercentage`: Maximum allowed discount percentage
+  - `conditions`: Conditions for applying this prompt (e.g., "slow_move_item=true")
 
 #### `calculate_quote_pricing` (Business Logic)
-Calculate grouped pricing from request with provider_items, including applicable discount rules and price tiers.
+Calculate pricing information for an RFQ request using batch-optimized queries.
 
-**Note:** This is a business logic function that reads from REQUEST (not quote) and groups items by (provider_corp_external_id, segment_uuid).
+**Note:** This is a business logic function that reads from REQUEST (not quote) and groups items by provider_corp_external_id. Uses batch loaders for efficient multi-item processing.
 
 **Parameters:**
 ```python
 {
   request_uuid: String!     # RFQ request UUID
-  segment_uuid: String!     # Customer segment UUID for pricing rules
+  email: String!            # Customer email for segment lookup and batch-optimized queries
 }
 ```
+
+**Updated in v0.1.1**: Changed from `segment_uuid` to `email` parameter to leverage batch-optimized segment lookup.
 
 **Returns:** Custom pricing structure (not a GraphQL query)
 
 **Process:**
 1. Reads request items with provider_items arrays
-2. Fetches provider_item details (base_price_per_uom)
-3. Fetches batch details if batch_no specified (guardrail_price_per_uom, slow_move_item)
-4. Groups items by (provider_corp_external_id, segment_uuid)
-5. Calculates subtotals per group
-6. Fetches applicable discount_rules filtered by group subtotal
-7. Fetches applicable price_tiers filtered by item quantity
+2. Builds all_quote_items array with (item_uuid, provider_item_uuid, qty)
+3. Makes single batch call to get_item_price_tiers(email, all_quote_items)
+4. Fetches provider_item details (base_price_per_uom)
+5. Fetches batch details if batch_no specified (guardrail_price_per_uom, slow_move_item)
+6. Groups items by provider_corp_external_id
+7. Applies tier pricing with client-side quantity filtering
+8. Calculates subtotals per group and overall total
 
 **Response Structure:**
 ```json
 {
   "request_uuid": "req-uuid",
-  "segment_uuid": "seg-uuid",
   "groups": [
     {
       "provider_corp_external_id": "PROVIDER-001",
-      "segment_uuid": "seg-uuid",
       "items": [
         {
           "item_uuid": "item-uuid",
@@ -336,43 +311,33 @@ Calculate grouped pricing from request with provider_items, including applicable
           "price_per_uom": 9.50,
           "guardrail_price_per_uom": 9.50,
           "slow_move_item": true,
-          "subtotal": 4750.00,
-          "price_tiers": [
-            {
-              "itemPriceTierUuid": "tier-uuid",
-              "quantityGreaterThen": 500,
-              "quantityLessThen": 1000,
-              "marginPerUom": 8.75
-            }
-          ]
+          "expired_at": "2026-03-15T00:00:00Z",
+          "subtotal": 4750.00
         }
       ],
-      "subtotal": 4750.00,
-      "discount_rules": [
-        {
-          "discountRuleUuid": "rule-uuid",
-          "subtotalGreaterThan": 1000.00,
-          "subtotalLessThan": 10000.00,
-          "maxDiscountPercentage": 5.0
-        }
-      ]
+      "group_subtotal": 4750.00
     }
-  ],
-  "subtotal": 4750.00
+  ]
 }
 ```
 
 **Key Features:**
-- **Information Provider Pattern**: Returns discount_rules and price_tiers WITHOUT applying them
-- **LLM Decision Making**: LLM presents options to user and applies discounts only after confirmation
+- **Batch-Optimized**: Single GraphQL query loads all price tiers using DataLoader pattern
+- **Client-Side Filtering**: Filters price tiers by quantity for each line item
 - **Multi-Provider Support**: Groups enable comparison across multiple providers
 - **Batch-Specific Pricing**: Includes guardrail pricing and slow-move flags when available
+- **Separate Discount Prompts**: Use `get_discount_prompts` separately for LLM-driven discount suggestions
 
 **Usage Notes:**
 - Call this BEFORE creating quotes (Step 7 in main workflow)
-- Use returned discount_rules to present options to user
-- Use returned price_tiers to suggest quantity adjustments
+- Use `get_discount_prompts` separately to fetch discount suggestions
+- Pricing is calculated with tier-based pricing and batch overrides
 - Create quotes only after user confirms pricing (Step 8)
+
+**Performance Improvement:**
+- **Before v0.1.1**: O(N) GraphQL queries (1 per item for price tiers)
+- **After v0.1.1**: O(1) GraphQL queries (1 batch query for all items)
+- **Example**: For 10 provider items: 11 queries → 2 queries = 82% reduction
 
 ### Installment Queries
 
@@ -738,7 +703,7 @@ type Segment {
 
 ## MCP Tool to GraphQL Mapping
 
-**Total MCP Tools**: 29 (all implemented)
+**Total MCP Tools**: 28 (all implemented)
 
 | # | MCP Tool | GraphQL Operation | Type | Category | Notes |
 |---|----------|-------------------|------|----------|-------|
@@ -759,9 +724,9 @@ type Segment {
 | 15 | get_quote | quote | Query | Quote | Retrieve quote |
 | 16 | search_quotes | quoteList | Query | Quote | Search quotes |
 | 17 | update_quote_item | insertUpdateQuoteItem | Mutation | Quote | Update quote item discount |
-| 18 | get_item_price_tiers | itemPriceTierList | Query | Pricing | Get tiered pricing (with qty filters) |
-| 19 | get_discount_rules | discountRuleList | Query | Pricing | Get discount rules (with subtotal filters) |
-| 20 | calculate_quote_pricing | Multiple Queries | Business Logic | Pricing | Groups request items, returns pricing + rules |
+| 18 | get_item_price_tiers | itemPriceTiers | Query | Pricing | Batch-optimized tier loading with email + quote_items |
+| 19 | get_discount_prompts | discountPrompts | Query | Pricing | Batch-optimized prompt loading from all scopes |
+| 20 | calculate_quote_pricing | itemPriceTiers + Multiple | Business Logic | Pricing | Batch-optimized pricing with email-based segment lookup |
 | 21 | create_installment | insertUpdateInstallment | Mutation | Installment | Create installment |
 | 22 | update_installment | insertUpdateInstallment | Mutation | Installment | Update installment status/SO |
 | 23 | create_installments | insertUpdateInstallment | Mutation | Installment | Create multiple installments |
@@ -770,7 +735,7 @@ type Segment {
 | 26 | confirm_quote_and_create_installments | insertUpdateQuote + insertUpdateInstallment | Composite | Workflow | Confirm quote, disapprove others, create installments |
 | 27 | upload_rfq_file | insertUpdateFile | Mutation | File | Upload document |
 | 28 | get_rfq_files | fileList | Query | File | Get files |
-| 29 | get_segment_contacts | segmentContactList | Query | Segment | List contacts (read-only) |
+| -- | get_segment_contacts | segmentContactList | Query | Segment | DEPRECATED: Segment lookup now via email in pricing tools |
 
 ---
 
