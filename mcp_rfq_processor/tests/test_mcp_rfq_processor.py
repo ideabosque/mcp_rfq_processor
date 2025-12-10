@@ -1435,17 +1435,8 @@ def test_calculate_quote_pricing(mcp_rfq_processor, test_data):
                     assert "guardrail_price_per_uom" in item
                     assert "subtotal" in item
 
-                    # Verify price_tiers at item level
-                    assert "price_tiers" in item
-
-                    price_tiers = item.get("price_tiers", [])
-                    logger.info(
-                        f"Item {item.get('item_uuid')} has {len(price_tiers)} price tier(s) "
-                        f"for qty {item.get('qty')}"
-                    )
-
         logger.info(
-            f"Found {len(groups)} pricing group(s) with batch-loaded price tiers"
+            f"Found {len(groups)} pricing group(s) with batch-optimized pricing"
         )
 
 

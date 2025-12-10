@@ -229,7 +229,25 @@ class RequestProcessor(GraphQLBackedProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        return humps.decamelize(result["request"])
+        request_data = result["request"]
+
+        # Handle case where request might be a JSON string instead of a dict
+        if isinstance(request_data, str):
+            import json
+            # Empty string means no data found - return empty dict
+            if not request_data.strip():
+                return {}
+            try:
+                request_data = json.loads(request_data)
+            except json.JSONDecodeError:
+                self.logger.error(f"Failed to parse request JSON string: {request_data[:200]}")
+                return {}
+
+        # Check if request_data is None or empty - return empty dict
+        if not request_data:
+            return {}
+
+        return humps.decamelize(request_data)
 
     # * MCP Function.
     @handle_errors(operation_name="search RFQ requests")
