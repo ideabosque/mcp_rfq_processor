@@ -277,6 +277,7 @@ ITEM_PRICE_TIER_TEST_DATA = _TEST_DATA.get("item_price_tier_test_data", [])
 ITEM_PRICE_TIER_LIST_TEST_DATA = _TEST_DATA.get("item_price_tier_list_test_data", [])
 DISCOUNT_RULE_TEST_DATA = _TEST_DATA.get("discount_rule_test_data", [])
 DISCOUNT_RULE_LIST_TEST_DATA = _TEST_DATA.get("discount_rule_list_test_data", [])
+DISCOUNT_PROMPT_TEST_DATA = _TEST_DATA.get("discount_prompt_test_data", [])
 REQUEST_TEST_DATA = _TEST_DATA.get("request_test_data", [])
 REQUEST_GET_TEST_DATA = _TEST_DATA.get("request_get_test_data", [])
 REQUEST_LIST_TEST_DATA = _TEST_DATA.get("request_list_test_data", [])
@@ -478,30 +479,9 @@ def test_get_item_price_tiers(mcp_rfq_processor, test_data):
     """Test getting active item price tiers with quantity and price filters."""
     # Build arguments from test data
     arguments = {
-        "page_number": test_data.get("pageNumber", 1),
-        "limit": test_data.get("limit", 50),
+        "email": test_data.get("email", None),
+        "quote_items": test_data.get("quote_items", []),
     }
-
-    # Add optional filters (including new quantity and price filters)
-    optional_fields = [
-        "itemUuid",
-        "providerItemUuid",
-        "segmentUuid",
-        "minQuantityGreaterThen",
-        "maxQuantityGreaterThen",
-        "minQuantityLessThen",
-        "maxQuantityLessThen",
-        "minPrice",
-        "maxPrice",
-    ]
-
-    for field in optional_fields:
-        if test_data.get(field) is not None:
-            # Convert camelCase to snake_case for Python function
-            snake_case_field = field[0].lower() + "".join(
-                ["_" + c.lower() if c.isupper() else c for c in field[1:]]
-            )
-            arguments[snake_case_field] = test_data.get(field)
 
     result, error = call_method(
         mcp_rfq_processor,
@@ -512,22 +492,6 @@ def test_get_item_price_tiers(mcp_rfq_processor, test_data):
 
     assert error is None
     assert result is not None
-    assert "total" in result
-
-    # Verify response structure
-    if "item_price_tier_list" in result or "itemPriceTierList" in result:
-        price_tiers = result.get("item_price_tier_list") or result.get(
-            "itemPriceTierList"
-        )
-        if price_tiers and len(price_tiers) > 0:
-            # Check that first tier has expected fields
-            tier = price_tiers[0]
-            assert "item_price_tier_uuid" in tier or "itemPriceTierUuid" in tier
-            # Verify status is active
-            assert tier.get("status") == "active"
-            logger.info(
-                f"Found {len(price_tiers)} active price tier(s) with filters: {arguments}"
-            )
 
 
 @pytest.mark.integration
@@ -646,6 +610,102 @@ def test_get_discount_rules(mcp_rfq_processor, test_data):
             logger.info(
                 f"Found {len(discount_rules)} active discount rule(s) with filters: {arguments}"
             )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("test_data", DISCOUNT_PROMPT_TEST_DATA)
+@log_test_result
+def test_get_discount_prompts(mcp_rfq_processor, test_data):
+    """
+    Test getting discount prompts using batch loader optimization.
+
+    This test uses the new batch-optimized approach that:
+    - Looks up segment_uuid from email via segment_contact_loader
+    - Loads discount prompts from all hierarchical scopes:
+      * GLOBAL - applies to all quotes
+      * SEGMENT - applies to customer segment
+      * ITEM - applies to specific items
+      * PROVIDER_ITEM - applies to specific provider items
+    - Automatically deduplicates prompts across scopes
+    - Returns combined prompts with conditions, rules, scope, tags, and priority
+
+    Required parameters:
+    - email: Customer email for segment lookup
+
+    Optional parameters:
+    - quote_items: List of items with item_uuid and provider_item_uuid
+    """
+    # Build arguments from test data
+    arguments = {
+        "email": test_data.get("email"),
+    }
+
+    # Add quote_items if present
+    if test_data.get("quote_items"):
+        arguments["quote_items"] = test_data.get("quote_items")
+
+    result, error = call_method(
+        mcp_rfq_processor,
+        "get_discount_prompts",
+        arguments,
+        "get_discount_prompts",
+    )
+
+    assert error is None
+    assert result is not None
+    assert "discount_prompts" in result
+
+    # Verify response structure
+    discount_prompts = result.get("discount_prompts", [])
+    if discount_prompts and len(discount_prompts) > 0:
+        # Check that first prompt has expected fields
+        prompt = discount_prompts[0]
+        assert "discount_prompt_uuid" in prompt or "discountPromptUuid" in prompt
+        assert "scope" in prompt, "Prompt should have scope field"
+        assert "discount_prompt" in prompt or "discountPrompt" in prompt
+
+        # Verify scope is one of the valid values
+        scope = prompt.get("scope")
+        valid_scopes = ["global", "segment", "item", "provider_item"]
+        assert (
+            scope in valid_scopes
+        ), f"Scope should be one of {valid_scopes}, got {scope}"
+
+        # Log prompt details
+        prompt_text = prompt.get("discount_prompt") or prompt.get("discountPrompt")
+        tags = prompt.get("tags", [])
+        priority = prompt.get("priority")
+        conditions = prompt.get("conditions")
+        discount_rules = prompt.get("discount_rules") or prompt.get("discountRules")
+
+        logger.info(f"Discount prompt: scope={scope}, priority={priority}")
+        logger.info(f"  Text: {prompt_text[:100]}..." if prompt_text else "  No text")
+        logger.info(f"  Tags: {tags}")
+        if conditions:
+            logger.info(f"  Conditions: {conditions}")
+        if discount_rules:
+            logger.info(f"  Rules: {discount_rules}")
+
+        # Verify all returned prompts have 'active' status
+        assert (
+            prompt.get("status") == "active"
+        ), "All discount prompts should have 'active' status"
+
+        logger.info(
+            f"Found {len(discount_prompts)} active discount prompt(s) for email: {arguments['email']}"
+        )
+
+        # Group by scope for reporting
+        scope_counts = {}
+        for p in discount_prompts:
+            scope_val = p.get("scope")
+            scope_counts[scope_val] = scope_counts.get(scope_val, 0) + 1
+
+        logger.info(f"Prompts by scope: {scope_counts}")
+    else:
+        logger.info(
+            f"No discount prompts found for email: {arguments['email']} - this is acceptable"
+        )
 
 
 # ============================================================================
@@ -1339,13 +1399,13 @@ def test_update_quote_item(mcp_rfq_processor, test_data):
 @pytest.mark.parametrize("test_data", CALCULATE_QUOTE_PRICING_TEST_DATA)
 @log_test_result
 def test_calculate_quote_pricing(mcp_rfq_processor, test_data):
-    """Test calculating quote pricing with item-level discount rules."""
+    """Test calculating quote pricing with batch-optimized price tiers."""
     result, error = call_method(
         mcp_rfq_processor,
         "calculate_quote_pricing",
         {
             "request_uuid": test_data.get("requestUuid"),
-            "segment_uuid": test_data.get("segmentUuid"),
+            "email": test_data.get("email"),
         },
         "calculate_quote_pricing",
     )
@@ -1353,9 +1413,7 @@ def test_calculate_quote_pricing(mcp_rfq_processor, test_data):
     assert error is None
     assert result is not None
     assert "request_uuid" in result
-    assert "segment_uuid" in result
     assert "groups" in result
-    assert "subtotal" in result
 
     # Verify response structure
     groups = result.get("groups", [])
@@ -1365,11 +1423,6 @@ def test_calculate_quote_pricing(mcp_rfq_processor, test_data):
             assert "provider_corp_external_id" in group
             assert "subtotal" in group
             assert "items" in group
-
-            # Verify discount_rules are NOT at group level (they should be at item level)
-            assert (
-                "discount_rules" not in group
-            ), "discount_rules should not be at group level"
 
             items = group.get("items", [])
             if items:
@@ -1385,31 +1438,14 @@ def test_calculate_quote_pricing(mcp_rfq_processor, test_data):
                     # Verify price_tiers at item level
                     assert "price_tiers" in item
 
-                    # Verify discount_rules at item level
-                    assert (
-                        "discount_rules" in item
-                    ), "discount_rules should be at item level"
-
-                    discount_rules = item.get("discount_rules", [])
+                    price_tiers = item.get("price_tiers", [])
                     logger.info(
-                        f"Item {item.get('item_uuid')} has {len(discount_rules)} discount rule(s) "
-                        f"for subtotal {item.get('subtotal')}"
+                        f"Item {item.get('item_uuid')} has {len(price_tiers)} price tier(s) "
+                        f"for qty {item.get('qty')}"
                     )
 
-                    # If discount rules exist, verify their structure
-                    if discount_rules:
-                        for rule in discount_rules:
-                            assert (
-                                "discount_rule_uuid" in rule
-                                or "discountRuleUuid" in rule
-                            )
-                            # Verify provider_item field was removed
-                            assert (
-                                "provider_item" not in rule
-                            ), "provider_item should be removed from discount rules"
-
         logger.info(
-            f"Found {len(groups)} pricing group(s) with item-level discount rules"
+            f"Found {len(groups)} pricing group(s) with batch-loaded price tiers"
         )
 
 

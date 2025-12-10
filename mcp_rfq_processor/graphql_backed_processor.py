@@ -30,7 +30,8 @@ class GraphQLBackedProcessor:
         operation_name: str,
         operation_type: str,
         variables: Dict[str, Any],
+        query: str = None,
     ) -> Dict[str, Any]:
         return self.graphql_client.execute_query(
-            function_name, operation_name, operation_type, variables
+            function_name, operation_name, operation_type, variables, query=query
         )

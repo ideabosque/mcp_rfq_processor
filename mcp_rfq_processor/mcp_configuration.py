@@ -531,91 +531,75 @@ MCP_CONFIGURATION = {
         # Pricing Tools (3)
         {
             "name": "get_item_price_tiers",
-            "description": "Get active tiered pricing for items based on item, provider, customer segments, and quantity ranges. Returns applicable price tiers with margin information. Typically used via calculate_quote_pricing, but can be called directly to explore volume pricing scenarios or answer 'what if' questions.",
+            "description": "Get tiered pricing for multiple items using batch loader optimization. Uses customer email for segment lookup and efficiently loads price tiers for quote items with automatic quantity filtering. Returns only tiers matching each item's quantity range. Preferred for processing multiple items efficiently.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "page_number": {
-                        "type": "integer",
-                        "description": "Page number (default: 1)",
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Results per page (default: 50)",
-                    },
-                    "item_uuid": {
+                    "email": {
                         "type": "string",
-                        "description": "Filter by item UUID",
+                        "description": "Customer email address for segment lookup",
                     },
-                    "provider_item_uuid": {
-                        "type": "string",
-                        "description": "Filter by provider item UUID",
-                    },
-                    "segment_uuid": {
-                        "type": "string",
-                        "description": "Filter by customer segment UUID",
-                    },
-                    "quantity_value": {
-                        "type": "number",
-                        "description": "Find the price tier that matches this specific quantity value (finds tiers where quantity_greater_then <= value < quantity_less_then)",
-                    },
-                    "min_price": {
-                        "type": "number",
-                        "description": "Filter tiers where price_per_uom is at least this value",
-                    },
-                    "max_price": {
-                        "type": "number",
-                        "description": "Filter tiers where price_per_uom is at most this value",
+                    "quote_items": {
+                        "type": "array",
+                        "description": "List of quote items with item_uuid, provider_item_uuid, and qty. Each item will have its applicable price tiers returned based on quantity thresholds.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "item_uuid": {
+                                    "type": "string",
+                                    "description": "Item UUID",
+                                },
+                                "provider_item_uuid": {
+                                    "type": "string",
+                                    "description": "Provider item UUID",
+                                },
+                                "qty": {
+                                    "type": "number",
+                                    "description": "Quantity for this item (used to filter matching price tiers)",
+                                },
+                            },
+                            "required": ["item_uuid", "provider_item_uuid", "qty"],
+                        },
                     },
                 },
-                "required": ["item_uuid", "provider_item_uuid", "segment_uuid"],
+                "required": ["email"],
             },
         },
         {
-            "name": "get_discount_rules",
-            "description": "Get applicable discount rules based on item, provider item, segment, and subtotal/discount thresholds. Returns discount rules with subtotal ranges and maximum discount percentages. By default, only active rules are returned. Typically used via calculate_quote_pricing, but can be called directly to explore discount options or check rules for specific scenarios.",
+            "name": "get_discount_prompts",
+            "description": "Get discount prompts for items using batch loader optimization. Loads prompts from all hierarchical scopes (GLOBAL, SEGMENT, ITEM, PROVIDER_ITEM) and deduplicates. Returns combined discount prompts with conditions and rules. Preferred for processing multiple items efficiently.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "page_number": {
-                        "type": "integer",
-                        "description": "Page number (default: 1)",
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Results per page (default: 50)",
-                    },
-                    "item_uuid": {
+                    "email": {
                         "type": "string",
-                        "description": "Filter by item UUID",
+                        "description": "Customer email address for segment lookup",
                     },
-                    "provider_item_uuid": {
-                        "type": "string",
-                        "description": "Filter by provider item UUID",
-                    },
-                    "segment_uuid": {
-                        "type": "string",
-                        "description": "Filter by customer segment UUID",
-                    },
-                    "subtotal_value": {
-                        "type": "number",
-                        "description": "Find the discount rule that matches this specific subtotal value (finds rules where subtotal_greater_than <= value < subtotal_less_than)",
-                    },
-                    "max_discount_percentage": {
-                        "type": "number",
-                        "description": "Filter rules where max_discount_percentage is at most this value",
-                    },
-                    "min_discount_percentage": {
-                        "type": "number",
-                        "description": "Filter rules where max_discount_percentage is at least this value",
+                    "quote_items": {
+                        "type": "array",
+                        "description": "List of quote items with item_uuid and provider_item_uuid to determine applicable prompts",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "item_uuid": {
+                                    "type": "string",
+                                    "description": "Item UUID",
+                                },
+                                "provider_item_uuid": {
+                                    "type": "string",
+                                    "description": "Provider item UUID",
+                                },
+                            },
+                            "required": ["item_uuid", "provider_item_uuid"],
+                        },
                     },
                 },
-                "required": ["item_uuid", "provider_item_uuid", "segment_uuid"],
+                "required": ["email"],
             },
         },
         {
             "name": "calculate_quote_pricing",
-            "description": "Calculate pricing information for an RFQ request grouped by provider and segment. Reads from request items with provider_items arrays, groups by (provider_corp_external_id, segment_uuid), and provides group-level subtotals, item-level details with price tiers, and applicable discount rules. Returns pricing structure for LLM to analyze and discuss options with end user. Does NOT apply discounts - only provides information.",
+            "description": "Calculate pricing information for an RFQ request using batch-optimized queries. Groups items by provider and provides subtotals and price tiers. Uses batch loaders for efficient multi-item processing. Returns pricing structure for decision-making.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -623,12 +607,12 @@ MCP_CONFIGURATION = {
                         "type": "string",
                         "description": "UUID of the RFQ request",
                     },
-                    "segment_uuid": {
+                    "email": {
                         "type": "string",
-                        "description": "Customer segment for pricing (required for discount rules and price tiers)",
+                        "description": "Customer email for segment lookup and batch-optimized price tier queries",
                     },
                 },
-                "required": ["request_uuid", "segment_uuid"],
+                "required": ["request_uuid", "email"],
             },
         },
         # Installment Tools (3)
@@ -1036,10 +1020,10 @@ MCP_CONFIGURATION = {
         },
         {
             "type": "tool",
-            "name": "get_discount_rules",
+            "name": "get_discount_prompts",
             "module_name": "mcp_rfq_processor",
             "class_name": "MCPRfqProcessor",
-            "function_name": "get_discount_rules",
+            "function_name": "get_discount_prompts",
             "return_type": "text",
         },
         {

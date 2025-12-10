@@ -14,6 +14,7 @@ from typing import Any, Dict
 
 import boto3
 from botocore.client import BaseClient
+
 from silvaengine_utility import Utility
 
 from .error_handler import (
@@ -88,13 +89,15 @@ class GraphQLClient:
         operation_name: str,
         operation_type: str,
         variables: Dict[str, Any],
+        query: str = None,
     ) -> Dict[str, Any]:
         """Execute a GraphQL query or mutation."""
         try:
-            schema = self.fetch_schema(function_name)
-            query = Utility.generate_graphql_operation(
-                operation_name, operation_type, schema
-            )
+            if query is None:
+                schema = self.fetch_schema(function_name)
+                query = Utility.generate_graphql_operation(
+                    operation_name, operation_type, schema
+                )
             self.logger.info(f"Query: {query}/{function_name}")
             return Utility.execute_graphql_query(
                 self.logger,
