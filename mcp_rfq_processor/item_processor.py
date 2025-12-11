@@ -55,11 +55,16 @@ class ItemProcessor(RequestProcessor):
         Get item details.
         Maps to GraphQL: item query
         """
+        variables = {}
+        if "item_uuid" in arguments:
+            variables["itemUuid"] = arguments["item_uuid"]
+        if "item_external_id" in arguments:
+            variables["itemExternalId"] = arguments["item_external_id"]
         result = self._execute_graphql_query(
             "ai_rfq_graphql",
             "item",
             "Query",
-            {"itemUuid": arguments["item_uuid"]},
+            variables,
         )
 
         # Check for error in response and propagate if present
