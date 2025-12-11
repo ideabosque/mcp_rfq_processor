@@ -32,6 +32,60 @@ The `ai_rfq_engine` GraphQL API provides comprehensive management of:
 - **Files**: Document attachments
 - **Discounts**: Pricing rules
 
+### GraphQL Operation Flow
+
+```mermaid
+sequenceDiagram
+    participant MCP as MCP Tool
+    participant Client as GraphQL Client
+    participant Lambda as AWS Lambda<br/>(ai_rfq_graphql)
+    participant DDB as DynamoDB
+
+    Note over MCP,DDB: Query Operation Example
+    MCP->>Client: Call tool (e.g., get_rfq_request)
+    Client->>Client: Build GraphQL query
+    Client->>Client: Transform params (snake_case → camelCase)
+    Client->>Lambda: POST GraphQL query
+    activate Lambda
+    Lambda->>DDB: Query data
+    DDB-->>Lambda: Result set
+    Lambda->>Lambda: Apply business rules
+    Lambda-->>Client: GraphQL response
+    deactivate Lambda
+    Client->>Client: Transform response (camelCase → snake_case)
+    Client-->>MCP: Formatted result
+
+    Note over MCP,DDB: Mutation Operation Example
+    MCP->>Client: Call tool (e.g., create_quote)
+    Client->>Client: Build GraphQL mutation
+    Client->>Client: Validate input schema
+    Client->>Lambda: POST GraphQL mutation
+    activate Lambda
+    Lambda->>Lambda: Validate business rules
+    Lambda->>DDB: Write/Update data
+    DDB-->>Lambda: Confirmation
+    Lambda->>Lambda: Trigger auto-transitions
+    Lambda->>DDB: Update related entities
+    DDB-->>Lambda: Complete
+    Lambda-->>Client: GraphQL response
+    deactivate Lambda
+    Client->>Client: Transform response
+    Client-->>MCP: Formatted result
+
+    Note over MCP,DDB: Batch Query Optimization (v0.1.1)
+    MCP->>Client: Call tool (e.g., calculate_quote_pricing)
+    Client->>Client: Build batch query<br/>with all quote_items
+    Client->>Lambda: POST single GraphQL query
+    activate Lambda
+    Lambda->>DDB: Batch load segments
+    Lambda->>DDB: Batch load price tiers<br/>(1 query for N items)
+    DDB-->>Lambda: Complete dataset
+    Lambda-->>Client: All results
+    deactivate Lambda
+    Client->>Client: Client-side filtering by qty
+    Client-->>MCP: Optimized result (82% fewer queries)
+```
+
 ---
 
 ## Query Operations

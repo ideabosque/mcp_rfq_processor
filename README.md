@@ -41,14 +41,59 @@ See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for complete workflow documentati
 
 ## Architecture
 
+### High-Level Architecture
+
+```mermaid
+graph TB
+    subgraph Clients
+        AI[AI Assistant<br/>Claude, etc.]
+        Browser[Browser / Custom Client]
+    end
+
+    subgraph MCP_Layer
+        MCPServer[MCP RFQ Processor<br/>this package]
+        Processors[Layered Processors<br/>Request | Item | Quote | Pricing | Installment]
+    end
+
+    subgraph Backend_Layer
+        GraphQL[ai_rfq_engine<br/>GraphQL API<br/>AWS Lambda]
+        Batch[Batch Loaders<br/>DataLoader Pattern]
+    end
+
+    subgraph Data_Layer
+        DDB[(DynamoDB<br/>RFQ Tables)]
+        S3[(S3<br/>File Storage)]
+    end
+
+    AI -->|MCP Protocol| MCPServer
+    Browser -->|MCP Protocol| MCPServer
+    MCPServer --> Processors
+    Processors -->|GraphQL Queries/Mutations| GraphQL
+    GraphQL --> Batch
+    Batch -->|Optimized Queries| DDB
+    GraphQL -->|Store/Retrieve Files| S3
+```
+
+### Component Flow
+
 ```
 AI Assistant (Claude, etc.)
-    ↓ MCP Protocol
+    ↓ MCP Protocol (28 Tools)
 MCP RFQ Processor (this package)
+    ├── Request Processor (8 tools)
+    ├── Item Processor (4 tools)
+    ├── Quote Processor (5 tools)
+    ├── Pricing Processor (3 tools)
+    ├── Installment Processor (4 tools)
+    ├── File Processor (2 tools)
+    └── Segment Processor (1 tool)
     ↓ GraphQL over AWS Lambda
 ai_rfq_engine (backend)
+    ├── Batch Loaders (v0.1.1)
+    ├── Status Managers
+    └── Business Rules Engine
     ↓
-DynamoDB Tables
+DynamoDB Tables + S3 Storage
 ```
 
 ## Installation
@@ -132,6 +177,73 @@ processor.endpoint_id = "your-endpoint-id"
 ## Available MCP Tools
 
 All 28 tools are defined in `mcp_configuration.py` and exposed by `MCPRfqProcessor`.
+
+### Tool Organization
+
+```mermaid
+graph TB
+    subgraph Request_Management[Request Management - 8 Tools]
+        R1[submit_rfq_request]
+        R2[update_rfq_request]
+        R3[get_rfq_request]
+        R4[search_rfq_requests]
+        R5[add_item_to_rfq_request]
+        R6[remove_item_from_rfq_request]
+        R7[assign_provider_item_to_request_item]
+        R8[remove_provider_item_from_request_item]
+    end
+
+    subgraph Item_Management[Item & Inventory - 4 Tools]
+        I1[search_items]
+        I2[get_item]
+        I3[get_provider_items]
+        I4[get_provider_item_batches]
+    end
+
+    subgraph Quote_Management[Quote Management - 5 Tools]
+        Q1[create_quote]
+        Q2[update_quote]
+        Q3[get_quote]
+        Q4[search_quotes]
+        Q5[update_quote_item]
+    end
+
+    subgraph Pricing[Pricing & Discounts - 3 Tools]
+        P1[get_item_price_tiers<br/>Batch-Optimized]
+        P2[get_discount_prompts<br/>Hierarchical Scopes]
+        P3[calculate_quote_pricing<br/>Groups by Provider]
+    end
+
+    subgraph Installment[Installment Management - 4 Tools]
+        IN1[create_installment]
+        IN2[update_installment]
+        IN3[create_installments]
+        IN4[get_installments]
+    end
+
+    subgraph Workflow[Workflow Helpers - 2 Tools]
+        W1[confirm_request_and_create_quotes]
+        W2[confirm_quote_and_create_installments]
+    end
+
+    subgraph Files[File Management - 2 Tools]
+        F1[upload_rfq_file]
+        F2[get_rfq_files]
+    end
+
+    subgraph Segments[Segment Management - 1 Tool]
+        S1[get_segment_contacts]
+    end
+
+    style Request_Management fill:#e1f5ff
+    style Item_Management fill:#fff4e1
+    style Quote_Management fill:#e1ffe1
+    style Pricing fill:#ffe1f5
+    style Installment fill:#f5e1ff
+    style Workflow fill:#e1fff4
+    style Files fill:#ffe1e1
+    style Segments fill:#f5ffe1
+```
 
 ### 1. Request Management (8 tools)
 

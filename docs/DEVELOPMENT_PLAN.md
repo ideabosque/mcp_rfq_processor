@@ -452,6 +452,54 @@ stateDiagram-v2
     end note
 ```
 
+### Batch Optimization Flow (v0.1.1)
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant MCP as MCP Processor
+    participant Batch as Batch Loader
+    participant GraphQL as GraphQL API
+    participant DB as DynamoDB
+
+    Note over User,DB: Traditional Approach (v0.1.0 - Multiple Queries)
+    User->>MCP: calculate_quote_pricing(request_uuid, segment_uuid)
+    loop For each item (N items)
+        MCP->>GraphQL: itemPriceTiers(segment_uuid, item_uuid)
+        GraphQL->>DB: Query price tiers
+        DB-->>GraphQL: Price tier data
+        GraphQL-->>MCP: Single item pricing
+    end
+    Note over MCP: Total: N queries for N items
+
+    Note over User,DB: Optimized Approach (v0.1.1 - Single Batch Query)
+    User->>MCP: calculate_quote_pricing(request_uuid, email)
+    MCP->>MCP: Build all_quote_items array<br/>[{item_uuid, provider_item_uuid, qty}...]
+    MCP->>Batch: get_item_price_tiers(email, quote_items)
+    Batch->>GraphQL: itemPriceTiers(email, quote_items[])
+    GraphQL->>DB: Lookup segment from email
+    GraphQL->>DB: Batch load ALL price tiers<br/>for ALL items (1 query)
+    DB-->>GraphQL: All price tier data
+    GraphQL-->>Batch: Complete pricing dataset
+    Batch->>Batch: Client-side quantity filtering<br/>per item
+    Batch-->>MCP: Filtered price tiers per item
+    Note over MCP: Total: 1 query for N items<br/>82% reduction
+
+    Note over User,DB: Discount Prompts - Hierarchical Batch Loading
+    User->>MCP: get_discount_prompts(email, quote_items)
+    MCP->>Batch: Load from all scopes
+    Batch->>GraphQL: discountPrompts(email, quote_items)
+    GraphQL->>DB: GLOBAL scope prompts
+    GraphQL->>DB: SEGMENT scope prompts
+    GraphQL->>DB: ITEM scope prompts
+    GraphQL->>DB: PROVIDER_ITEM scope prompts
+    DB-->>GraphQL: All hierarchical prompts
+    GraphQL-->>Batch: Combined prompts
+    Batch->>Batch: Deduplicate prompts
+    Batch-->>MCP: Unique discount rules
+    MCP-->>User: "Apply 5% for slow_move_item"
+```
+
 ### mcp_marketing_collection (Reference Pattern)
 - MCP tool definitions with detailed descriptions
 - AWS Lambda client initialization
