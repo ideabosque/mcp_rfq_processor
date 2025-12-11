@@ -387,7 +387,10 @@ def test_get_item(mcp_rfq_processor, test_data):
     result, error = call_method(
         mcp_rfq_processor,
         "get_item",
-        {"item_uuid": test_data.get("itemUuid")},
+        {
+            "item_external_id": test_data.get("item_external_id"),
+            "item_uuid": test_data.get("itemUuid"),
+        },
         "get_item",
     )
 
