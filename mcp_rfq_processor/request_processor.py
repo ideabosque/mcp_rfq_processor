@@ -1056,7 +1056,7 @@ class RequestProcessor(GraphQLBackedProcessor):
         # Update request with modified items array
         variables = {
             "requestUuid": arguments["request_uuid"],
-            "items": current_items,
+            "items": convert_decimal_to_number(current_items),
             "updatedBy": "MCP",
         }
 
@@ -1193,7 +1193,7 @@ class RequestProcessor(GraphQLBackedProcessor):
         # Update request with modified items array
         variables = {
             "requestUuid": arguments["request_uuid"],
-            "items": current_items,
+            "items": convert_decimal_to_number(current_items),
             "updatedBy": "MCP",
         }
 

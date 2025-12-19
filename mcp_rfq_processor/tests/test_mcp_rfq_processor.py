@@ -937,7 +937,7 @@ def test_assign_provider_item_to_request_item(mcp_rfq_processor, test_data):
     assert get_error is None
     assert get_result is not None
 
-    items = get_result.get("items", [])
+    items = test_data.get("items", [])
     if not items:
         pytest.skip("No items in request to test provider item assignment")
 
