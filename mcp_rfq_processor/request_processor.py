@@ -7,6 +7,7 @@ __author__ = "bibow"
 from typing import Any, Dict
 
 import humps
+from silvaengine_utility import convert_decimal_to_number
 
 # Import centralized error handling utilities
 from .error_handler import (
@@ -234,13 +235,16 @@ class RequestProcessor(GraphQLBackedProcessor):
         # Handle case where request might be a JSON string instead of a dict
         if isinstance(request_data, str):
             import json
+
             # Empty string means no data found - return empty dict
             if not request_data.strip():
                 return {}
             try:
                 request_data = json.loads(request_data)
             except json.JSONDecodeError:
-                self.logger.error(f"Failed to parse request JSON string: {request_data[:200]}")
+                self.logger.error(
+                    f"Failed to parse request JSON string: {request_data[:200]}"
+                )
                 return {}
 
         # Check if request_data is None or empty - return empty dict
@@ -352,7 +356,7 @@ class RequestProcessor(GraphQLBackedProcessor):
         # Update request with new items array
         variables = {
             "requestUuid": arguments["request_uuid"],
-            "items": current_items,
+            "items": convert_decimal_to_number(current_items),
             "updatedBy": "MCP",
         }
 
@@ -466,7 +470,7 @@ class RequestProcessor(GraphQLBackedProcessor):
         # Update request with modified items array
         variables = {
             "requestUuid": arguments["request_uuid"],
-            "items": current_items,
+            "items": convert_decimal_to_number(current_items),
             "updatedBy": "MCP",
         }
 

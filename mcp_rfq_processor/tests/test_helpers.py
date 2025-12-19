@@ -11,7 +11,7 @@ import uuid
 from functools import wraps
 from typing import Any, Dict, Optional, Tuple
 
-from silvaengine_utility import Utility
+from silvaengine_utility.serializer import Serializer
 
 logger = logging.getLogger("test_mcp_rfq_processor")
 
@@ -56,7 +56,7 @@ def call_method(
         elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
         logger.info(
             f"Method response: cid={cid} op={op} elapsed_ms={elapsed_ms} "
-            f"success=True result={Utility.json_dumps(result)}"
+            f"success=True result={Serializer.json_dumps(result)}"
         )
         return result, None
     except Exception as exc:
