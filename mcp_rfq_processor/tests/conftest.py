@@ -33,8 +33,9 @@ sys.path.insert(0, os.path.join(base_dir, "silvaengine_dynamodb_base"))
 sys.path.insert(0, os.path.join(base_dir, "mcp_rfq_processor"))
 sys.path.insert(0, os.path.join(base_dir, "ai_rfq_engine"))
 
+from silvaengine_utility.graphql import Graphql
+
 from mcp_rfq_processor.mcp_rfq_processor import MCPRfqProcessor
-from silvaengine_utility import Utility
 
 # Test settings
 SETTING = {
@@ -48,6 +49,7 @@ SETTING = {
         },
     },
     "endpoint_id": os.getenv("endpoint_id"),
+    "part_id": os.getenv("part_id"),
     "execute_mode": os.getenv("execute_mode", "local"),
     "sales_rep_emails": {
         "PROVIDER-001": "sales1@provider.com",
@@ -66,6 +68,7 @@ def mcp_rfq_processor():
     try:
         processor = MCPRfqProcessor(logger, **SETTING)
         processor.endpoint_id = SETTING.get("endpoint_id")
+        processor.part_id = SETTING.get("part_id")
         # Mark as real processor instance for validation
         setattr(processor, "__is_real__", True)
         logger.info("MCPRfqProcessor initialized successfully")
@@ -82,15 +85,16 @@ def schema(mcp_rfq_processor):
     Depends on mcp_rfq_processor fixture.
     """
     endpoint_id = SETTING.get("endpoint_id")
-    execute_mode = SETTING.get("execute_mode")
 
     try:
-        schema = Utility.fetch_graphql_schema(
-            logger,
-            endpoint_id,
+        context = {
+            "endpoint_id": endpoint_id,
+            "setting": SETTING,
+            "logger": logger,
+        }
+        schema = Graphql.fetch_graphql_schema(
+            context,
             "ai_rfq_graphql",
-            setting=SETTING,
-            test_mode=execute_mode,
         )
         logger.info("GraphQL schema fetched successfully")
         return schema
@@ -171,9 +175,7 @@ def _raise_no_matches(filters_desc: str, items: Sequence[pytest.Item]) -> None:
     """Raise informative error when no tests matched filter."""
     sample = ", ".join(sorted(item.name for item in items)[:5])
     hint = f" Available sample: {sample}" if sample else ""
-    raise pytest.UsageError(
-        f"{filters_desc} did not match any collected tests.{hint}"
-    )
+    raise pytest.UsageError(f"{filters_desc} did not match any collected tests.{hint}")
 
 
 def pytest_collection_modifyitems(
@@ -206,9 +208,7 @@ def pytest_collection_modifyitems(
         name_match = not target_lower or test_func_name == target_lower
 
         # Check if any requested marker is present
-        marker_match = not markers or any(
-            item.get_closest_marker(m) for m in markers
-        )
+        marker_match = not markers or any(item.get_closest_marker(m) for m in markers)
 
         if name_match and marker_match:
             selected.append(item)
@@ -216,9 +216,7 @@ def pytest_collection_modifyitems(
             deselected.append(item)
 
     if not selected:
-        _raise_no_matches(
-            _format_filter_description(target, marker_filter_raw), items
-        )
+        _raise_no_matches(_format_filter_description(target, marker_filter_raw), items)
 
     items[:] = selected
     config.hook.pytest_deselected(items=deselected)

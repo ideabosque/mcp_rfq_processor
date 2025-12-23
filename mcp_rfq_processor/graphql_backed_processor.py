@@ -24,6 +24,14 @@ class GraphQLBackedProcessor:
     def endpoint_id(self, value: str):
         self.graphql_client.endpoint_id = value
 
+    @property
+    def part_id(self) -> str | None:
+        return self.graphql_client.part_id
+
+    @part_id.setter
+    def part_id(self, value: str):
+        self.graphql_client.part_id = value
+
     def _execute_graphql_query(
         self,
         function_name: str,
