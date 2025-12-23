@@ -346,8 +346,8 @@ flowchart TD
 
     ConfirmRequest --> CreateQuotes[Create Quotes<br/>One per Provider<br/>status: initial → in_progress]
 
-    CreateQuotes --> Negotiate[Negotiate with User<br/>Show Price Tiers & Discount Prompts]
-    Negotiate --> ApplyDiscounts[Apply Approved Discounts<br/>to Quote Items (via update_quote_item)]
+    CreateQuotes --> Negotiate[Negotiate with User: Show Price Tiers & Discount Prompts]
+    Negotiate --> ApplyDiscounts[Apply Approved Discounts to Quote Items via update_quote_item]
 
     ApplyDiscounts --> UpdateShipping[Update Quote<br/>with Shipping Info]
     UpdateShipping --> ConfirmQuote[Confirm Quote<br/>status: confirmed]
