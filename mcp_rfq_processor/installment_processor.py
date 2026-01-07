@@ -72,6 +72,9 @@ class InstallmentProcessor(PricingProcessor):
                 error_code=ErrorCode.VALIDATION_FAILED,
             )
 
+        # Convert to float to ensure proper arithmetic operations
+        final_total_quote_amount = float(final_total_quote_amount)
+
         # Get all existing installments for the quote (to calculate priority and total)
         all_installments_result = self.get_installments(
             quote_uuid=quote_uuid,
@@ -90,7 +93,7 @@ class InstallmentProcessor(PricingProcessor):
             # Only count pending/paid installments toward total
             inst_status = inst.get("status", "")
             if inst_status in ["pending", "paid"]:
-                existing_total += inst.get("installment_amount", 0)
+                existing_total += float(inst.get("installment_amount", 0))
 
             # Track highest priority across ALL installments (including cancelled)
             priority = inst.get("priority", 0)
@@ -119,6 +122,8 @@ class InstallmentProcessor(PricingProcessor):
         # Determine installment amount
         requested_amount = arguments.get("installment_amount")
         if requested_amount is not None:
+            # Convert to float to ensure proper arithmetic operations
+            requested_amount = float(requested_amount)
             # User provided amount - validate and cap at remaining balance
             if requested_amount <= 0:
                 return build_error_response(
@@ -358,8 +363,8 @@ class InstallmentProcessor(PricingProcessor):
 
         quote_uuid = arguments["quote_uuid"]
         request_uuid = arguments["request_uuid"]
-        interval_num = arguments["interval_num"]
-        total_pay_period = arguments["total_pay_period"]
+        interval_num = int(arguments["interval_num"])
+        total_pay_period = float(arguments["total_pay_period"])
 
         # Validate interval_num
         if interval_num <= 0:
@@ -396,6 +401,9 @@ class InstallmentProcessor(PricingProcessor):
                 error_code=ErrorCode.VALIDATION_FAILED,
             )
 
+        # Convert to float to ensure proper arithmetic operations
+        final_total_quote_amount = float(final_total_quote_amount)
+
         # Get all existing installments for the quote
         all_installments_result = self.get_installments(
             quote_uuid=quote_uuid,
@@ -413,7 +421,7 @@ class InstallmentProcessor(PricingProcessor):
         for inst in all_installment_list:
             inst_status = inst.get("status", "")
             if inst_status in ["pending", "paid"]:
-                existing_total += inst.get("installment_amount", 0)
+                existing_total += float(inst.get("installment_amount", 0))
 
             priority = inst.get("priority", 0)
             if priority is not None and priority > max_priority:
