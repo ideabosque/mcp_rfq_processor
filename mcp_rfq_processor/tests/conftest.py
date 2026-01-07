@@ -33,9 +33,8 @@ sys.path.insert(0, os.path.join(base_dir, "silvaengine_dynamodb_base"))
 sys.path.insert(0, os.path.join(base_dir, "mcp_rfq_processor"))
 sys.path.insert(0, os.path.join(base_dir, "ai_rfq_engine"))
 
-from silvaengine_utility.graphql import Graphql
-
 from mcp_rfq_processor.mcp_rfq_processor import MCPRfqProcessor
+from silvaengine_utility.graphql import Graphql
 
 # Test settings
 SETTING = {
@@ -85,10 +84,12 @@ def schema(mcp_rfq_processor):
     Depends on mcp_rfq_processor fixture.
     """
     endpoint_id = SETTING.get("endpoint_id")
+    part_id = SETTING.get("part_id")
 
     try:
         context = {
             "endpoint_id": endpoint_id,
+            "part_id": part_id,
             "setting": SETTING,
             "logger": logger,
         }
