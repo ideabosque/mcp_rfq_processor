@@ -529,7 +529,7 @@ class InstallmentProcessor(PricingProcessor):
                 # If one fails, return error with what was created so far
                 return build_error_response(
                     message=f"Failed to create installment {i+1}/{interval_num}: {error.get('message', 'Unknown error')}",
-                    error_code=ErrorCode.GRAPHQL_ERROR,
+                    error_code=ErrorCode.GRAPHQL_QUERY_FAILED,
                     details={
                         "created_installments": created_installments,
                         "failed_at": i + 1,
