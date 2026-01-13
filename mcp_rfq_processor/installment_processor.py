@@ -178,7 +178,7 @@ class InstallmentProcessor(PricingProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        installment = humps.decamelize(result["insertUpdateInstallment"]["installment"])
+        installment = humps.decamelize(result["installment"])
 
         return installment
 
@@ -255,7 +255,7 @@ class InstallmentProcessor(PricingProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        installment = humps.decamelize(result["insertUpdateInstallment"]["installment"])
+        installment = humps.decamelize(result["installment"])
 
         # Business Rule: Auto-complete quote if all installments are paid
         # Check if status was updated to 'paid' and if we should check for quote completion
@@ -537,9 +537,7 @@ class InstallmentProcessor(PricingProcessor):
                     },
                 )
 
-            installment = humps.decamelize(
-                result["insertUpdateInstallment"]["installment"]
-            )
+            installment = humps.decamelize(result["installment"])
             created_installments.append(installment)
 
         return {
@@ -576,4 +574,4 @@ class InstallmentProcessor(PricingProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        return humps.decamelize(result["installmentList"])
+        return humps.decamelize(result)

@@ -66,33 +66,6 @@ class GraphQLClient:
         else:
             return boto3.client("lambda")
 
-    def fetch_schema(self, function_name: str) -> Dict[str, Any]:
-        """Fetch and cache GraphQL schema for a function."""
-        try:
-            if self._schemas.get(function_name) is None:
-                context = {
-                    "endpoint_id": self.endpoint_id,
-                    "setting": self.setting,
-                    "logger": self.logger,
-                }
-                self._schemas[function_name] = Graphql.fetch_graphql_schema(
-                    context,
-                    function_name,
-                    aws_lambda=self._aws_lambda,
-                )
-            return self._schemas[function_name]
-        except Exception as e:
-            log = traceback.format_exc()
-            self.logger.error(log)
-            raise GraphQLError(
-                message=f"Failed to fetch GraphQL schema: {function_name}/{self.endpoint_id}. Please check the configuration and ensure all required settings are properly. Error: {e}",
-                error_code=ErrorCode.GRAPHQL_SCHEMA_FETCH_FAILED,
-                details={
-                    "function_name": function_name,
-                    "endpoint_id": self.endpoint_id,
-                },
-            )
-
     def execute_query(
         self,
         function_name: str,
@@ -103,25 +76,25 @@ class GraphQLClient:
     ) -> Dict[str, Any]:
         """Execute a GraphQL query or mutation."""
         try:
-            if query is None:
-                schema = self.fetch_schema(function_name)
-                query = Graphql.generate_graphql_operation(
-                    operation_name, operation_type, schema
-                )
-            self.logger.info(f"Query: {query}/{function_name}")
             context = {
                 "endpoint_id": self.endpoint_id,
                 "part_id": self.part_id,
                 "setting": self.setting,
                 "logger": self.logger,
             }
-            return Graphql.execute_graphql_query(
-                context,
-                function_name,
-                query,
-                variables,
-                aws_lambda=self._aws_lambda,
+
+            result = Graphql.request_graphql(
+                context=context,
+                module_name="ai_rfq_engine",
+                function_name="ai_rfq_graphql",
+                graphql_operation_type=operation_type,
+                graphql_operation_name=operation_name,
+                class_name="AIRFQEngine",
+                variables=variables,
+                query=query,
             )
+            return result
+
         except GraphQLError as e:
             log = traceback.format_exc()
             self.logger.error(log)

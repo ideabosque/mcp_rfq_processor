@@ -60,4 +60,4 @@ class SegmentProcessor(FileProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        return humps.decamelize(result["segmentContactList"])
+        return humps.decamelize(result)
