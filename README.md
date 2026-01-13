@@ -46,23 +46,23 @@ See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for complete workflow documentati
 ```mermaid
 graph TB
     subgraph Clients
-        AI[AI Assistant<br/>Claude, etc.]
-        Browser[Browser / Custom Client]
+        AI["AI Assistant<br/>Claude, etc."]
+        Browser["Browser / Custom Client"]
     end
 
-    subgraph MCP_Layer
-        MCPServer[MCP RFQ Processor<br/>this package]
-        Processors[Layered Processors<br/>Request | Item | Quote | Pricing | Installment]
+    subgraph MCP_Layer["MCP Layer"]
+        MCPServer["MCP RFQ Processor<br/>this package"]
+        Processors["Layered Processors<br/>Request | Item | Quote | Pricing | Installment"]
     end
 
-    subgraph Backend_Layer
-        GraphQL[ai_rfq_engine<br/>GraphQL API<br/>AWS Lambda]
-        Batch[Batch Loaders<br/>DataLoader Pattern]
+    subgraph Backend_Layer["Backend Layer"]
+        GraphQL["ai_rfq_engine<br/>GraphQL API<br/>AWS Lambda"]
+        Batch["Batch Loaders<br/>DataLoader Pattern"]
     end
 
-    subgraph Data_Layer
-        DDB[(DynamoDB<br/>RFQ Tables)]
-        S3[(S3<br/>File Storage)]
+    subgraph Data_Layer["Data Layer"]
+        DDB[("DynamoDB<br/>RFQ Tables")]
+        S3[("S3<br/>File Storage")]
     end
 
     AI -->|MCP Protocol| MCPServer
