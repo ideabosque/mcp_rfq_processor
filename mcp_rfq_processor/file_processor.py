@@ -9,10 +9,7 @@ from typing import Any, Dict
 import humps
 
 # Import centralized error handling utilities
-from .error_handler import (
-    handle_errors,
-    propagate_error_if_present,
-)
+from .error_handler import handle_errors, propagate_error_if_present
 
 # Import status management
 from .installment_processor import InstallmentProcessor
@@ -48,7 +45,7 @@ class FileProcessor(InstallmentProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        file_obj = humps.decamelize(result["insertUpdateFile"]["file"])
+        file_obj = humps.decamelize(result["file"])
 
         return file_obj
 
@@ -79,4 +76,4 @@ class FileProcessor(InstallmentProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        return humps.decamelize(result["fileList"])
+        return humps.decamelize(result)

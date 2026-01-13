@@ -7,6 +7,7 @@ __author__ = "bibow"
 from typing import Any, Dict
 
 import humps
+
 from silvaengine_utility import convert_decimal_to_number
 
 # Import centralized error handling utilities
@@ -134,7 +135,7 @@ class RequestProcessor(GraphQLBackedProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        request = humps.decamelize(result["insertUpdateRequest"]["request"])
+        request = humps.decamelize(result["request"])
 
         return request
 
@@ -198,7 +199,7 @@ class RequestProcessor(GraphQLBackedProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        request = humps.decamelize(result["insertUpdateRequest"]["request"])
+        request = humps.decamelize(result["request"])
 
         # Critical Business Rule: Auto-disapprove quotes if request status changed to 'modified'
         new_status = request.get("status", "")
@@ -230,28 +231,26 @@ class RequestProcessor(GraphQLBackedProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        request_data = result["request"]
-
         # Handle case where request might be a JSON string instead of a dict
-        if isinstance(request_data, str):
+        if isinstance(result, str):
             import json
 
             # Empty string means no data found - return empty dict
-            if not request_data.strip():
+            if not result.strip():
                 return {}
             try:
-                request_data = json.loads(request_data)
+                result = json.loads(result)
             except json.JSONDecodeError:
                 self.logger.error(
-                    f"Failed to parse request JSON string: {request_data[:200]}"
+                    f"Failed to parse request JSON string: {result[:200]}"
                 )
                 return {}
 
         # Check if request_data is None or empty - return empty dict
-        if not request_data:
+        if not result:
             return {}
 
-        return humps.decamelize(request_data)
+        return humps.decamelize(result)
 
     # * MCP Function.
     @handle_errors(operation_name="search RFQ requests")
@@ -283,7 +282,7 @@ class RequestProcessor(GraphQLBackedProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        return humps.decamelize(result["requestList"])
+        return humps.decamelize(result)
 
     # * MCP Function.
     @handle_errors(operation_name="add item to RFQ request")
@@ -375,7 +374,7 @@ class RequestProcessor(GraphQLBackedProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        request = humps.decamelize(result["insertUpdateRequest"]["request"])
+        request = humps.decamelize(result["request"])
 
         self.logger.info(
             f"Successfully added item to request {arguments['request_uuid']}"
@@ -489,7 +488,7 @@ class RequestProcessor(GraphQLBackedProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        request = humps.decamelize(result["insertUpdateRequest"]["request"])
+        request = humps.decamelize(result["request"])
 
         self.logger.info(
             f"Successfully removed item from request {arguments['request_uuid']}"
@@ -957,7 +956,7 @@ class RequestProcessor(GraphQLBackedProcessor):
         if error := propagate_error_if_present(provider_item_result):
             return error
 
-        provider_item = humps.decamelize(provider_item_result.get("providerItem"))
+        provider_item = humps.decamelize(provider_item_result)
 
         if not provider_item:
             raise ValidationError(
@@ -1071,7 +1070,7 @@ class RequestProcessor(GraphQLBackedProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        request = humps.decamelize(result["insertUpdateRequest"]["request"])
+        request = humps.decamelize(result["request"])
 
         self.logger.info(
             f"Successfully assigned provider item to item in request {arguments['request_uuid']}"
@@ -1208,7 +1207,7 @@ class RequestProcessor(GraphQLBackedProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        request = humps.decamelize(result["insertUpdateRequest"]["request"])
+        request = humps.decamelize(result["request"])
 
         self.logger.info(
             f"Successfully removed provider item from item in request {arguments['request_uuid']}"
