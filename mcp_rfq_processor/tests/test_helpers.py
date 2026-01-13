@@ -6,10 +6,20 @@ from __future__ import annotations
 __author__ = "bibow"
 
 import logging
+import os
+import sys
 import time
 import uuid
 from functools import wraps
 from typing import Any, Dict, Optional, Tuple
+
+# Make package importable
+base_dir = os.getenv("base_dir", os.getcwd())
+sys.path.insert(0, base_dir)
+sys.path.insert(0, os.path.join(base_dir, "silvaengine_utility"))
+sys.path.insert(0, os.path.join(base_dir, "silvaengine_dynamodb_base"))
+sys.path.insert(0, os.path.join(base_dir, "mcp_rfq_processor"))
+sys.path.insert(0, os.path.join(base_dir, "ai_rfq_engine"))
 
 from silvaengine_utility.serializer import Serializer
 
