@@ -9,10 +9,7 @@ from typing import Any, Dict
 import humps
 
 # Import centralized error handling utilities
-from .error_handler import (
-    handle_errors,
-    propagate_error_if_present,
-)
+from .error_handler import handle_errors, propagate_error_if_present
 from .item_processor import ItemProcessor
 
 # Import status management
@@ -80,7 +77,7 @@ class QuoteProcessor(ItemProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        quote = humps.decamelize(result["insertUpdateQuote"]["quote"])
+        quote = humps.decamelize(result["quote"])
 
         # We already have the request from validation above
         # Create quote items from request items that have provider_items assigned
@@ -219,7 +216,7 @@ class QuoteProcessor(ItemProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        quote = humps.decamelize(result["insertUpdateQuote"]["quote"])
+        quote = humps.decamelize(result["quote"])
 
         return quote
 
@@ -276,7 +273,7 @@ class QuoteProcessor(ItemProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        quote_item = humps.decamelize(result["insertUpdateQuoteItem"]["quoteItem"])
+        quote_item = humps.decamelize(result["quoteItem"])
 
         return quote_item
 
@@ -352,7 +349,7 @@ class QuoteProcessor(ItemProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        quote_item = humps.decamelize(result["insertUpdateQuoteItem"]["quoteItem"])
+        quote_item = humps.decamelize(result["quoteItem"])
 
         self.logger.info(
             f"Successfully added quote item to quote {arguments['quote_uuid']}"
@@ -405,7 +402,7 @@ class QuoteProcessor(ItemProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        return humps.decamelize(result["quote"])
+        return humps.decamelize(result)
 
     # * MCP Function.
     @handle_errors(operation_name="search quotes")
@@ -437,4 +434,4 @@ class QuoteProcessor(ItemProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        return humps.decamelize(result["quoteList"])
+        return humps.decamelize(result)

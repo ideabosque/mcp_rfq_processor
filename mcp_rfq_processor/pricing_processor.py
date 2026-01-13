@@ -108,7 +108,7 @@ class PricingProcessor(QuoteProcessor):
             return error
 
         # Return decamelized list of price tiers
-        return {"item_price_tiers": humps.decamelize(result["itemPriceTiers"])}
+        return {"item_price_tiers": humps.decamelize(result)}
 
     # * MCP Function.
     @handle_errors(operation_name="get discount prompts")
@@ -203,7 +203,7 @@ class PricingProcessor(QuoteProcessor):
             return error
 
         # Return decamelized list of discount prompts
-        return {"discount_prompts": humps.decamelize(result["discountPrompts"])}
+        return {"discount_prompts": humps.decamelize(result)}
 
     # * MCP Function.
     @handle_errors(operation_name="calculate quote pricing")

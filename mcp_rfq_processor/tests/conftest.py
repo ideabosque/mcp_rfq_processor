@@ -41,15 +41,8 @@ SETTING = {
     "region_name": os.getenv("region_name"),
     "aws_access_key_id": os.getenv("aws_access_key_id"),
     "aws_secret_access_key": os.getenv("aws_secret_access_key"),
-    "functs_on_local": {
-        "ai_rfq_graphql": {
-            "module_name": "ai_rfq_engine",
-            "class_name": "AIRFQEngine",
-        },
-    },
     "endpoint_id": os.getenv("endpoint_id"),
     "part_id": os.getenv("part_id"),
-    "execute_mode": os.getenv("execute_mode", "local"),
     "sales_rep_emails": {
         "PROVIDER-001": "sales1@provider.com",
         "PROVIDER-002": "sales2@provider.com",

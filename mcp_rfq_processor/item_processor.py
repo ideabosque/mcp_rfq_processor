@@ -46,7 +46,7 @@ class ItemProcessor(RequestProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        return humps.decamelize(result["itemList"])
+        return humps.decamelize(result)
 
     # * MCP Function.
     @handle_errors(operation_name="get item")
@@ -71,7 +71,7 @@ class ItemProcessor(RequestProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        return humps.decamelize(result["item"])
+        return humps.decamelize(result)
 
     # * MCP Function.
     @handle_errors(operation_name="get provider items")
@@ -110,7 +110,7 @@ class ItemProcessor(RequestProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        provider_items_result = humps.decamelize(result["providerItemList"])
+        provider_items_result = humps.decamelize(result)
         provider_item_list = provider_items_result.get("provider_item_list", [])
 
         # Extract batch filter parameters from arguments (optional)
@@ -199,4 +199,4 @@ class ItemProcessor(RequestProcessor):
         if error := propagate_error_if_present(result):
             return error
 
-        return humps.decamelize(result["providerItemBatchList"])
+        return humps.decamelize(result)
