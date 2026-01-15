@@ -7,7 +7,6 @@ __author__ = "bibow"
 from typing import Any, Dict
 
 import humps
-
 from silvaengine_utility import convert_decimal_to_number
 
 # Import centralized error handling utilities
@@ -557,6 +556,11 @@ class RequestProcessor(GraphQLBackedProcessor):
         RequestStatusTransitions.validate_transition(
             current_status, RequestStatus.CONFIRMED
         )
+        if current_status == RequestStatus.CONFIRMED:
+            self.logger.warning(
+                f"Request {request_uuid} is already in 'confirmed' status"
+            )
+            return current_request
 
         # Step 1: Update request status to confirmed
         self.logger.info(f"Updating request {request_uuid} status to confirmed")
