@@ -392,10 +392,7 @@ class QuoteProcessor(ItemProcessor):
             variables["requestUuid"] = arguments["request_uuid"]
 
         result = self._execute_graphql_query(
-            "ai_rfq_graphql",
-            "quote",
-            "Query",
-            variables,
+            "ai_rfq_graphql", "quote", "Query", variables
         )
 
         # Check for error in response and propagate if present
