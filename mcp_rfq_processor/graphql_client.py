@@ -14,6 +14,7 @@ from typing import Any, Dict
 
 import boto3
 from botocore.client import BaseClient
+
 from silvaengine_utility.graphql import Graphql
 
 from .error_handler import (
@@ -79,6 +80,7 @@ class GraphQLClient:
             context = {
                 "endpoint_id": self.endpoint_id,
                 "part_id": self.part_id,
+                "partition_key": f"{self.endpoint_id}#{self.part_id}",
                 "setting": self.setting,
                 "logger": self.logger,
             }
