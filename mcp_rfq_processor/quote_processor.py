@@ -255,7 +255,7 @@ class QuoteProcessor(ItemProcessor):
         variables = {
             "quoteUuid": arguments["quote_uuid"],
             "quoteItemUuid": arguments.get("quote_item_uuid"),
-            "subtotalDiscount": arguments.get("discount_amount", 0.0),
+            "subtotalDiscount": float(arguments.get("discount_amount", 0.0)),
             "updatedBy": "MCP",
         }
 
@@ -326,12 +326,12 @@ class QuoteProcessor(ItemProcessor):
             "quoteUuid": arguments["quote_uuid"],
             "providerItemUuid": arguments["provider_item_uuid"],
             "itemUuid": arguments["item_uuid"],
-            "qty": arguments["qty"],
+            "qty": float(arguments["qty"]),
             "segmentUuid": arguments.get("segment_uuid") or "default",
             "batchNo": arguments.get("batch_no"),
             "requestUuid": arguments.get("request_uuid"),
             "requestData": arguments.get("request_data"),
-            "subtotalDiscount": arguments.get("discount_amount", 0.0),
+            "subtotalDiscount": float(arguments.get("discount_amount", 0.0)),
             "updatedBy": "MCP",
         }
 
