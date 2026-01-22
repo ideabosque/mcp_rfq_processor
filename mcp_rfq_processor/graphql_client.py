@@ -13,9 +13,11 @@ import traceback
 from typing import Any, Dict
 
 import boto3
+import httpx
 from botocore.client import BaseClient
 
 from silvaengine_utility.graphql import Graphql
+from silvaengine_utility.serializer import Serializer
 
 from .error_handler import (
     ErrorCode,
@@ -77,25 +79,40 @@ class GraphQLClient:
     ) -> Dict[str, Any]:
         """Execute a GraphQL query or mutation."""
         try:
-            context = {
-                "endpoint_id": self.endpoint_id,
-                "part_id": self.part_id,
-                "partition_key": f"{self.endpoint_id}#{self.part_id}",
-                "setting": self.setting,
-                "logger": self.logger,
+            if query is None:
+                schema = Graphql.get_graphql_schema(
+                    module_name="ai_rfq_engine",
+                    class_name="AIRFQEngine",
+                )
+
+                query = Graphql.generate_graphql_operation(
+                    operation_name, operation_type, schema
+                )
+
+            payload = Serializer.json_dumps({"query": query, "variables": variables})
+
+            headers = {
+                "x-api-key": self.setting.get("x_api_key"),
+                "Part-Id": self.part_id,
+                "Content-Type": "application/json",
             }
 
-            result = Graphql.request_graphql(
-                context=context,
-                module_name="ai_rfq_engine",
-                function_name="ai_rfq_graphql",
-                graphql_operation_type=operation_type,
-                graphql_operation_name=operation_name,
-                class_name="AIRFQEngine",
-                variables=variables,
-                query=query,
-            )
-            return result
+            with httpx.Client(http2=True) as client:
+                response = client.post(
+                    self.setting.get("ai_rfq_graphql_endpoint").format(
+                        endpoint_id=self.endpoint_id
+                    ),
+                    headers=headers,
+                    content=payload,
+                )
+
+            result = response.json()
+
+            if "errors" in result:
+                error_message = result["errors"][0].get("message", "GraphQL error")
+                raise Exception(f"GraphQL error: {error_message}")
+
+            return result.get("data", {}).get(operation_name)
 
         except GraphQLError as e:
             log = traceback.format_exc()
