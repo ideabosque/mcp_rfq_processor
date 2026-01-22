@@ -10,7 +10,7 @@ import logging
 import os
 import re
 import sys
-from typing import Any, Dict, Sequence
+from typing import Sequence
 
 import pytest
 from dotenv import load_dotenv
@@ -47,8 +47,13 @@ SETTING = {
         "PROVIDER-001": "sales1@provider.com",
         "PROVIDER-002": "sales2@provider.com",
     },
-    "x_api_key": os.getenv("x_api_key"),
-    "ai_rfq_graphql_endpoint": os.getenv("ai_rfq_graphql_endpoint"),
+    "graphql_modules": {
+        "ai_rfq_engine": {
+            "class_name": "AIRFQEngine",
+            "endpoint": os.getenv("ai_rfq_engine_endpoint"),
+            "x_api_key": os.getenv("ai_rfq_engine_x_api_key"),
+        }
+    },
 }
 
 
