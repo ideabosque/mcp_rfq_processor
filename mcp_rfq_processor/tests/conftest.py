@@ -47,7 +47,8 @@ SETTING = {
         "PROVIDER-001": "sales1@provider.com",
         "PROVIDER-002": "sales2@provider.com",
     },
-    "cache_enabled": os.getenv("cache_enabled", "0") == "1",
+    "x_api_key": os.getenv("x_api_key"),
+    "ai_rfq_graphql_endpoint": os.getenv("ai_rfq_graphql_endpoint"),
 }
 
 
