@@ -12,9 +12,7 @@ import logging
 import traceback
 from typing import Any, Dict
 
-import boto3
 import httpx
-from botocore.client import BaseClient
 
 from silvaengine_utility.graphql import Graphql
 from silvaengine_utility.serializer import Serializer
@@ -27,6 +25,69 @@ from .error_handler import (
 )
 
 
+class GraphQLModule:
+    """Encapsulates GraphQL module configuration and schema management."""
+
+    def __init__(
+        self,
+        endpoint_id: str,
+        module_name: str | None = None,
+        class_name: str | None = None,
+        endpoint: str | None = None,
+        x_api_key: str | None = None,
+    ):
+        """
+        Initialize GraphQL module configuration.
+
+        Args:
+            endpoint_id: Identifier for the endpoint
+            module_name: Optional module name for schema generation
+            class_name: Optional class name for schema generation
+            endpoint: Optional endpoint URL template with {endpoint_id} placeholder
+        """
+        self.endpoint_id = endpoint_id
+        self._module_name = module_name
+        self._class_name = class_name
+        self._endpoint = endpoint.format(endpoint_id=endpoint_id) if endpoint else None
+        self._x_api_key = x_api_key
+        self._schema = None
+
+    @property
+    def module_name(self) -> str | None:
+        """Get the module name used for schema generation."""
+        return self._module_name
+
+    @property
+    def class_name(self) -> str | None:
+        """Get the class name used for schema generation."""
+        return self._class_name
+
+    @property
+    def endpoint(self) -> str | None:
+        """Get the formatted endpoint URL."""
+        return self._endpoint
+
+    @property
+    def x_api_key(self) -> str | None:
+        """Get the API key for authentication."""
+        return self._x_api_key
+
+    @property
+    def schema(self):
+        """Get the cached GraphQL schema, loading it if necessary."""
+        if self._schema is None and self._module_name and self._class_name:
+            self.refresh_schema()
+        return self._schema
+
+    def refresh_schema(self):
+        """Load or reload the GraphQL schema from the configured module and class."""
+        if self._module_name and self._class_name:
+            self._schema = Graphql.get_graphql_schema(
+                module_name=self._module_name,
+                class_name=self._class_name,
+            )
+
+
 class GraphQLClient:
     """Client for executing GraphQL operations via AWS Lambda."""
 
@@ -35,8 +96,7 @@ class GraphQLClient:
         self.setting = setting
         self._endpoint_id = None
         self._part_id = None
-        self._schemas = {}
-        self._aws_lambda = self._initialize_aws_lambda_client(**setting)
+        self._graphql_modules = {}
 
     @property
     def endpoint_id(self) -> str | None:
@@ -54,20 +114,28 @@ class GraphQLClient:
     def part_id(self, value: str):
         self._part_id = value
 
-    def _initialize_aws_lambda_client(self, **setting: Dict[str, Any]) -> BaseClient:
-        """Initialize AWS Lambda client with credentials from settings."""
-        region_name = setting.get("region_name")
-        aws_access_key_id = setting.get("aws_access_key_id")
-        aws_secret_access_key = setting.get("aws_secret_access_key")
-        if region_name and aws_access_key_id and aws_secret_access_key:
-            return boto3.client(
-                "lambda",
-                region_name=region_name,
-                aws_access_key_id=aws_access_key_id,
-                aws_secret_access_key=aws_secret_access_key,
+    @property
+    def graphql_modules(self) -> Dict[str, GraphQLModule]:
+        return self._graphql_modules
+
+    def get_graphql_module(self, module_name: str) -> GraphQLModule | None:
+        """Get a GraphQL module by name."""
+        if not self._graphql_modules.get(module_name):
+            self._graphql_modules[module_name] = GraphQLModule(
+                endpoint_id=self.endpoint_id,
+                module_name=module_name,
+                class_name=self.setting.get("graphql_modules", {})
+                .get(module_name, {})
+                .get("class_name"),
+                endpoint=self.setting.get("graphql_modules", {})
+                .get(module_name, {})
+                .get("endpoint"),
+                x_api_key=self.setting.get("graphql_modules", {})
+                .get(module_name, {})
+                .get("x_api_key"),
             )
-        else:
-            return boto3.client("lambda")
+
+        return self._graphql_modules.get(module_name)
 
     def execute_query(
         self,
@@ -76,32 +144,27 @@ class GraphQLClient:
         operation_type: str,
         variables: Dict[str, Any],
         query: str = None,
+        module_name: str = "ai_rfq_engine",
     ) -> Dict[str, Any]:
         """Execute a GraphQL query or mutation."""
         try:
+            graphql_module = self.get_graphql_module(module_name)
             if query is None:
-                schema = Graphql.get_graphql_schema(
-                    module_name="ai_rfq_engine",
-                    class_name="AIRFQEngine",
-                )
-
                 query = Graphql.generate_graphql_operation(
-                    operation_name, operation_type, schema
+                    operation_name, operation_type, graphql_module.schema
                 )
 
             payload = Serializer.json_dumps({"query": query, "variables": variables})
 
             headers = {
-                "x-api-key": self.setting.get("x_api_key"),
+                "x-api-key": graphql_module.x_api_key,
                 "Part-Id": self.part_id,
                 "Content-Type": "application/json",
             }
 
             with httpx.Client(http2=True) as client:
                 response = client.post(
-                    self.setting.get("ai_rfq_graphql_endpoint").format(
-                        endpoint_id=self.endpoint_id
-                    ),
+                    graphql_module.endpoint,
                     headers=headers,
                     content=payload,
                 )
