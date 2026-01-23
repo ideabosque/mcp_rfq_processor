@@ -195,7 +195,7 @@ class QuoteProcessor(ItemProcessor):
             "requestUuid": arguments["request_uuid"],
             "quoteUuid": arguments["quote_uuid"],
             "shippingMethod": arguments.get("shipping_method"),
-            "shippingAmount": float(arguments.get("shipping_amount", 0.0)),
+            "shippingAmount": arguments.get("shipping_amount"),
             "status": arguments.get("status"),
             "notes": arguments.get("notes"),
             "updatedBy": "MCP",
