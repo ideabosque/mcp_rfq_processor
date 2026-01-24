@@ -12,6 +12,13 @@ import humps
 from .error_handler import handle_errors, propagate_error_if_present
 from .file_processor import FileProcessor
 
+SEGMENT_CONTACT = """query segmentContact($segmentUuid: String, $email: String!) {
+	segmentContact(segmentUuid: $segmentUuid, email: $email) {
+		partitionKey email contactUuid consumerCorpExternalId segmentUuid segment { 
+			partitionKey endpointId partId segmentUuid providerCorpExternalId segmentName segmentDescription
+		} updatedBy createdAt updatedAt
+	}    
+}"""
 # Import status management
 
 
@@ -38,7 +45,22 @@ class SegmentProcessor(FileProcessor):
 
         consumer_corp_external_id = arguments.get("consumer_corp_external_id")
         if not consumer_corp_external_id or consumer_corp_external_id == "":
-            consumer_corp_external_id = "XXXXXXXXXXXXXXXXXXXX"
+            variables = {
+                "email": email,
+            }
+            result = self._execute_graphql_query(
+                "ai_rfq_graphql",
+                "segmentContact",
+                "Query",
+                variables,
+                query=SEGMENT_CONTACT,
+            )
+
+            # Check for error in response and propagate if present
+            if error := propagate_error_if_present(result):
+                return error
+
+            return humps.decamelize(result)
 
         variables = {
             "pageNumber": arguments.get("page_number", 1),
@@ -46,7 +68,6 @@ class SegmentProcessor(FileProcessor):
             "consumerCorpExternalId": consumer_corp_external_id,
             "email": email,
         }
-
         variables = {k: v for k, v in variables.items() if v is not None and v != ""}
 
         result = self._execute_graphql_query(
