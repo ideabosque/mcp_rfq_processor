@@ -50,7 +50,13 @@ MCP_CONFIGURATION = {
                     "status": {
                         "type": "string",
                         "description": "Request status (default: initial)",
-                        "enum": ["initial", "in_progress", "confirmed", "completed", "modified"],
+                        "enum": [
+                            "initial",
+                            "in_progress",
+                            "confirmed",
+                            "completed",
+                            "modified",
+                        ],
                     },
                 },
                 "required": ["email", "request_title"],
@@ -523,6 +529,10 @@ MCP_CONFIGURATION = {
                     "discount_amount": {
                         "type": "number",
                         "description": "Discount amount (subtotal discount)",
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Updated notes for the quote item",
                     },
                 },
                 "required": ["quote_uuid", "quote_item_uuid"],
