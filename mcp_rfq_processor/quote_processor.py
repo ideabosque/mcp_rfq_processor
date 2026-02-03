@@ -256,6 +256,7 @@ class QuoteProcessor(ItemProcessor):
             "quoteUuid": arguments["quote_uuid"],
             "quoteItemUuid": arguments.get("quote_item_uuid"),
             "subtotalDiscount": float(arguments.get("discount_amount", 0.0)),
+            "notes": arguments.get("notes"),
             "updatedBy": "MCP",
         }
 
