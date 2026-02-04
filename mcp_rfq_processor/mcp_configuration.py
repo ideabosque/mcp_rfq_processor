@@ -373,48 +373,6 @@ MCP_CONFIGURATION = {
         },
         # Quote Management Tools (3)
         {
-            "name": "create_quote",
-            "description": "Create new quote for RFQ request. Returns quote UUID and total amount. Note: shipping_method and shipping_amount cannot be set during creation - use update_quote after creation to set these fields. The 'rounds' field (negotiation rounds) is automatically calculated by the backend.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request_uuid": {
-                        "type": "string",
-                        "description": "UUID of the RFQ request",
-                    },
-                    "provider_corp_external_id": {
-                        "type": "string",
-                        "description": "Provider corporation external ID",
-                    },
-                    "segment_uuid": {
-                        "type": "string",
-                        "description": "Customer segment UUID for pricing",
-                    },
-                    "sales_rep_email": {
-                        "type": "string",
-                        "description": "Email of the sales representative",
-                    },
-                    "status": {
-                        "type": "string",
-                        "description": "Quote status (default: initial)",
-                        "enum": [
-                            "initial",
-                            "in_progress",
-                            "confirmed",
-                            "completed",
-                            "disapproved",
-                        ],
-                    },
-                    "notes": {"type": "string", "description": "Additional notes"},
-                },
-                "required": [
-                    "request_uuid",
-                    "provider_corp_external_id",
-                    "segment_uuid",
-                ],
-            },
-        },
-        {
             "name": "update_quote",
             "description": "Update quote metadata (shipping, status, notes). Returns updated quote information. Note: rounds (negotiation rounds) are auto-calculated by the backend based on existing quotes from the same provider.",
             "inputSchema": {
@@ -979,14 +937,6 @@ MCP_CONFIGURATION = {
             "return_type": "text",
         },
         # Quote Management Tools
-        {
-            "type": "tool",
-            "name": "create_quote",
-            "module_name": "mcp_rfq_processor",
-            "class_name": "MCPRfqProcessor",
-            "function_name": "_create_quote",
-            "return_type": "text",
-        },
         {
             "type": "tool",
             "name": "update_quote",
