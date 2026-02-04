@@ -7,6 +7,7 @@ __author__ = "bibow"
 from typing import Any, Dict
 
 import humps
+
 from silvaengine_utility import convert_decimal_to_number
 
 # Import centralized error handling utilities
