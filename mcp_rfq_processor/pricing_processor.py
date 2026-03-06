@@ -75,7 +75,7 @@ class PricingProcessor(QuoteProcessor):
             }
 
         query = """
-        query GetItemPriceTiers($email: String!, $quoteItems: [JSON]) {
+        query GetItemPriceTiers($email: String!, $quoteItems: [JSONCamelCase]) {
             itemPriceTiers(email: $email, quoteItems: $quoteItems) {
                 itemUuid
                 providerItemUuid
@@ -171,7 +171,7 @@ class PricingProcessor(QuoteProcessor):
             }
 
         query = """
-        query GetDiscountPrompts($email: String!, $quoteItems: [JSON]) {
+        query GetDiscountPrompts($email: String!, $quoteItems: [JSONCamelCase]) {
             discountPrompts(email: $email, quoteItems: $quoteItems) {
                 discountPromptUuid
                 scope
