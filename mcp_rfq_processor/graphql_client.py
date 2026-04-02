@@ -152,7 +152,7 @@ class GraphQLClient:
 
             if not all([isinstance(query, str), str(query).strip()]):
                 query = GraphqlSchemaModel.get_schema(
-                    endpoint_id=GraphQLModule.endpoint_id,
+                    endpoint_id=graphql_module.endpoint_id,
                     operation_type=operation_type,
                     operation_name=operation_name,
                     module_name=module_name,
