@@ -7,7 +7,6 @@ __author__ = "bibow"
 from typing import Any, Dict
 
 import humps
-
 from silvaengine_utility import convert_decimal_to_number
 
 # Import centralized error handling utilities
@@ -326,8 +325,9 @@ class RequestProcessor(GraphQLBackedProcessor):
                 existing_item_uuid = existing_item.get("item_uuid")
                 if existing_item_uuid == new_item_uuid:
                     # Item exists - merge quantities
-                    existing_qty = existing_item.get("qty", 0)
-                    new_qty = new_item.get("qty", 0)
+                    existing_qty = int(existing_item.get("qty") or 0)
+                    new_qty = int(new_item.get("qty") or 0)
+
                     merged_qty = existing_qty + new_qty
                     existing_item["qty"] = merged_qty
 
