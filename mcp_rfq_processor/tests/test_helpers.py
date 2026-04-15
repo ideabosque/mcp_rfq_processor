@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.join(base_dir, "silvaengine_utility"))
 sys.path.insert(0, os.path.join(base_dir, "silvaengine_dynamodb_base"))
 sys.path.insert(0, os.path.join(base_dir, "mcp_rfq_processor"))
 sys.path.insert(0, os.path.join(base_dir, "ai_rfq_engine"))
+sys.path.insert(0, os.path.join(base_dir, "knowledge_graph_engine"))
 
 from silvaengine_utility.serializer import Serializer
 

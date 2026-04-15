@@ -25,21 +25,38 @@ class ItemProcessor(RequestProcessor):
         Search items catalog.
         Maps to GraphQL: itemList query
         """
-        variables = {
-            "pageNumber": arguments.get("page_number", 1),
-            "limit": arguments.get("limit", 50),
-            "itemType": arguments.get("item_type"),
-            "itemName": arguments.get("item_name"),
-            "uoms": arguments.get("uoms"),
-        }
+        # Search items From ai_rfq_graphql
+        # variables = {
+        #     "pageNumber": arguments.get("page_number", 1),
+        #     "limit": arguments.get("limit", 50),
+        #     "itemType": arguments.get("item_type"),
+        #     "itemName": arguments.get("item_name"),
+        #     "uoms": arguments.get("uoms"),
+        # }
 
-        variables = {k: v for k, v in variables.items() if v is not None and v != ""}
+        # variables = {k: v for k, v in variables.items() if v is not None and v != ""}
+
+        # result = self._execute_graphql_query(
+        #     "ai_rfq_graphql",
+        #     "itemList",
+        #     "Query",
+        #     variables,
+        # )
+        variables = {
+            "queryText": arguments.get("item_name") or "Query items",
+            "topK": arguments.get("limit", 50),
+            "page": arguments.get("page_number", 1),
+            "limit": arguments.get("limit", 50),
+        }
+        if arguments.get("item_name"):
+            variables["searchMode"] = "vector_cypher"
 
         result = self._execute_graphql_query(
-            "ai_rfq_graphql",
-            "itemList",
+            "knowledge_graph_graphql",
+            "search",
             "Query",
             variables,
+            module_name="knowledge_graph_engine",
         )
 
         # Check for error in response and propagate if present
