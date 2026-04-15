@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.join(base_dir, "silvaengine_utility"))
 sys.path.insert(0, os.path.join(base_dir, "silvaengine_dynamodb_base"))
 sys.path.insert(0, os.path.join(base_dir, "mcp_rfq_processor"))
 sys.path.insert(0, os.path.join(base_dir, "ai_rfq_engine"))
+sys.path.insert(0, os.path.join(base_dir, "knowledge_graph_engine"))
 
 from mcp_rfq_processor.mcp_rfq_processor import MCPRfqProcessor
 from silvaengine_utility.graphql import Graphql
@@ -52,6 +53,11 @@ SETTING = {
             "class_name": "AIRFQEngine",
             "endpoint": os.getenv("ai_rfq_engine_endpoint"),
             "x_api_key": os.getenv("ai_rfq_engine_x_api_key"),
+        },
+        "knowledge_graph_engine": {
+            "class_name": "KnowledgeGraphEngine",
+            "endpoint": os.getenv("knowledge_graph_engine_endpoint"),
+            "x_api_key": os.getenv("knowledge_graph_engine_x_api_key"),
         }
     },
 }
