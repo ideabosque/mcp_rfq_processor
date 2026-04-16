@@ -39,7 +39,7 @@ class GraphQLBackedProcessor:
         operation_type: str,
         variables: Dict[str, Any],
         query: str = None,
-        module_name: str = "ai_rfq_graphql",
+        module_name: str = "ai_rfq_engine",
     ) -> Dict[str, Any]:
         return self.graphql_client.execute_query(
             function_name, operation_name, operation_type, variables, query=query, module_name=module_name
