@@ -174,6 +174,7 @@ class GraphQLClient:
 
             with httpx.Client(http2=True) as client:
                 print(f">>>>>>>>>>>>>>>>>>>{payload}")
+                print(f">>>>>>>>>>>>>>>>>>> graphql_module.endpoint: {graphql_module.endpoint} \n headers: {headers}")
                 response = client.post(
                     graphql_module.endpoint,
                     headers=headers,
